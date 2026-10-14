@@ -71,6 +71,59 @@ export class Registry {
     return this.default
   }
 
+  /**
+   * Like resolvePath, but an unknown item id is probed on every server
+   * first. Happens when a client (typically a phone with downloads) asks for
+   * an item the proxy has never relayed, e.g. after the map was lost.
+   */
+  async resolvePathAsync(path: string): Promise<UpstreamServer> {
+    const m = PATH_ID_RE.exec(path)
+    if (!m) return this.default
+    const known = this.resolve(m[1])
+    if (known) return known
+    const kind = /\/(items|libraries|authors|series|collections|playlists|podcasts)\//.exec(path)?.[1]
+    if (kind) {
+      const probed = await this.probe(kind, m[1])
+      if (probed) return probed
+    }
+    return this.default
+  }
+
+  private readonly probing = new Map<string, Promise<UpstreamServer | undefined>>()
+
+  /** Ask each server whether it has `id`; remember and return the one that does. */
+  async probe(kind: string, id: string): Promise<UpstreamServer | undefined> {
+    const existing = this.probing.get(id)
+    if (existing) return existing
+    const apiKind = kind === 'podcasts' ? 'items' : kind
+    const task = (async () => {
+      const results = await Promise.all(
+        this.all.map(async (s) => {
+          try {
+            const r = await s.json(`/api/${apiKind}/${id}`)
+            if (r.status === 200 && r.json) {
+              this.learn(s.key, r.json)
+              this.record(id, s.key)
+              return s
+            }
+          } catch {
+            /* unreachable server: skip */
+          }
+          return undefined
+        })
+      )
+      const found = results.find(Boolean)
+      log.info(`[registry] probed ${kind} ${id}: ${found ? `on ${found.key}` : 'not found'}`)
+      return found
+    })()
+    this.probing.set(id, task)
+    try {
+      return await task
+    } finally {
+      this.probing.delete(id)
+    }
+  }
+
   record(id: string, serverKey: string, kind: string | null = null, mediaId: string | null = null) {
     const row: IdMapRow = { id, serverKey, kind, mediaId }
     const prev = this.cache.get(id)

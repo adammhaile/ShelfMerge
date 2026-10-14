@@ -1,10 +1,8 @@
-# Development stack: one throwaway Audiobookshelf server with the generated
-# fixture library. ShelfMerge itself runs on the host with `npm run dev`
-# and points at http://localhost:13378.
+# Development stack: two throwaway Audiobookshelf servers, each with its own
+# generated fixture library. ShelfMerge itself runs on the host with
+# `npm run dev` and federates both.
 #
-#   ./test/fixtures/generate.sh
-#   docker compose -f docker-compose.dev.yml up -d
-#   ./scripts/seed-abs.sh            # creates root user, library, service API key
+#   ./scripts/dev-up.sh      # generates fixtures, starts both, seeds them, writes config/shelfmerge.yaml
 services:
   abs-a:
     image: advplyr/audiobookshelf:2.37.1
@@ -18,6 +16,20 @@ services:
     environment:
       - TZ=UTC
 
+  abs-b:
+    image: advplyr/audiobookshelf:2.37.1
+    container_name: shelfmerge-abs-b
+    ports:
+      - "13379:80"
+    volumes:
+      - ./test/fixtures/generated/Books-B:/audiobooks:ro
+      - abs-b-config:/config
+      - abs-b-metadata:/metadata
+    environment:
+      - TZ=UTC
+
 volumes:
   abs-a-config:
   abs-a-metadata:
+  abs-b-config:
+  abs-b-metadata:

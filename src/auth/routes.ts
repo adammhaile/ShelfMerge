@@ -24,8 +24,8 @@ export function authRoutes(ctx: Context): Router {
 
   const loginPayload = (user: Request['smUser']) => ({
     user: ctx.users.toOldJSON(user),
-    userDefaultLibraryId: ctx.settings.defaultLibraryId,
-    serverSettings: ctx.settings.serverSettings,
+    userDefaultLibraryId: ctx.catalog.forUser(ctx.users.config(user))[0]?.id ?? null,
+    serverSettings: ctx.catalog.serverSettings,
     ereaderDevices: [],
     Source: 'docker'
   })
@@ -35,7 +35,7 @@ export function authRoutes(ctx: Context): Router {
       app: 'audiobookshelf',
       serverVersion: ctx.absVersion,
       isInit: true,
-      language: ctx.settings.language,
+      language: ctx.catalog.language,
       authMethods: ['local'],
       authFormData: {}
     })

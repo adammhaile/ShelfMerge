@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs'
 import { v4 as uuidv4 } from 'uuid'
 import type { Db, UserRow } from './db.js'
-import type { Config } from './config.js'
+import type { Config, UserConfig } from './config.js'
 import type { ProgressStore } from './progress.js'
 import type { TokenManager } from './auth/tokens.js'
 import { log } from './logger.js'
@@ -42,15 +42,24 @@ export const USER_PERMISSIONS = {
 }
 
 export class UserStore {
+  private readonly configs = new Map<string, UserConfig>()
+
   constructor(
     private readonly db: Db,
     private readonly tokens: TokenManager,
     private readonly progress: ProgressStore
   ) {}
 
+  /** The config entry for a user (library allow-list lives there). */
+  config(user: Pick<UserRow, 'username'>): UserConfig | undefined {
+    return this.configs.get(user.username)
+  }
+
   /** Create or update local users from config. Passwords are bcrypt-hashed at rest. */
   syncFromConfig(cfg: Config) {
+    this.configs.clear()
     for (const u of cfg.users) {
+      this.configs.set(u.username, u)
       const existing = this.byUsername(u.username)
       if (!existing) {
         this.db.prepare('INSERT INTO users (id, username, passwordHash, createdAt) VALUES (?, ?, ?, ?)').run(uuidv4(), u.username, bcrypt.hashSync(u.password, 10), Date.now())

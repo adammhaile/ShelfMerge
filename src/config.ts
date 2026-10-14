@@ -12,6 +12,11 @@ export interface ServerConfig {
 export interface UserConfig {
   username: string
   password: string
+  /**
+   * Libraries this user may see, as `serverKey:*`, `serverKey:Library Name`
+   * or `serverKey:<libraryId>`. Omitted means every library on every server.
+   */
+  libraries: string[] | null
 }
 
 export interface Config {
@@ -20,6 +25,8 @@ export interface Config {
   clientDir: string
   servers: ServerConfig[]
   users: UserConfig[]
+  /** Prefix library names with the server label. Defaults to on when there is more than one server. */
+  prefixLibraryNames: boolean
   /** Seconds. Defaults match Audiobookshelf (1 h access, 30 d refresh). */
   accessTokenExpiry: number
   refreshTokenExpiry: number
@@ -31,7 +38,8 @@ interface RawConfig {
   dataDir?: string
   clientDir?: string
   servers?: Record<string, { url: string; apiKey: string; label?: string }>
-  users?: Record<string, { password: string }>
+  users?: Record<string, { password: string; libraries?: string[] }>
+  prefixLibraryNames?: boolean
   accessTokenExpiry?: number
   refreshTokenExpiry?: number
   refreshTokenGracePeriod?: number
@@ -50,7 +58,12 @@ export function loadConfig(file = process.env.SHELFMERGE_CONFIG ?? 'config/shelf
 
   const users = Object.entries(raw.users ?? {}).map(([username, u]) => {
     if (!u?.password) throw new Error(`Config: user "${username}" needs a password`)
-    return { username, password: String(u.password) }
+    const libraries = u.libraries ? u.libraries.map(String) : null
+    for (const rule of libraries ?? []) {
+      const key = rule.split(':')[0]
+      if (!rule.includes(':') || !servers.some((s) => s.key === key)) throw new Error(`Config: user "${username}" library rule "${rule}" must be "<serverKey>:<library name, id or *>"`)
+    }
+    return { username, password: String(u.password), libraries }
   })
   if (!users.length) throw new Error('Config: at least one user is required')
 
@@ -62,6 +75,7 @@ export function loadConfig(file = process.env.SHELFMERGE_CONFIG ?? 'config/shelf
     clientDir: process.env.SHELFMERGE_CLIENT_DIR ?? resolveDir(raw.clientDir, 'client-dist'),
     servers,
     users,
+    prefixLibraryNames: raw.prefixLibraryNames ?? servers.length > 1,
     accessTokenExpiry: raw.accessTokenExpiry ?? 60 * 60,
     refreshTokenExpiry: raw.refreshTokenExpiry ?? 30 * 24 * 60 * 60,
     refreshTokenGracePeriod: raw.refreshTokenGracePeriod ?? 10 * 60

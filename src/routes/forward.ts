@@ -17,6 +17,17 @@ const STUBS: Record<string, unknown> = {
 }
 
 /**
+ * Server-wide lists that have no library id in the path: ask every server
+ * and concatenate the named array. Served from whichever servers answer.
+ * (/api/tags and /api/genres are admin-only upstream; clients read genres
+ * from a library's filterdata instead.)
+ */
+const MERGE_LISTS: Record<string, string> = {
+  '/collections': 'collections',
+  '/playlists': 'playlists'
+}
+
+/**
  * Generic /api forwarder for everything the proxy does not interpret.
  * JSON responses are buffered so the registry can learn ids from them;
  * media and files are streamed.
@@ -25,7 +36,20 @@ export function apiForward(ctx: Context) {
   return async (req: Request, res: Response, _next: NextFunction) => {
     if (req.method === 'GET' && req.path in STUBS) return res.json(STUBS[req.path])
 
-    const server = ctx.registry.resolvePath(req.path)
+    if (req.method === 'GET' && req.path in MERGE_LISTS) {
+      const field = MERGE_LISTS[req.path]
+      const parts = await Promise.all(
+        ctx.registry.all.map(async (s) => {
+          const r = await s.json<Record<string, unknown[]>>(req.smPath).catch(() => null)
+          if (r?.status !== 200 || !r.json) return []
+          ctx.registry.learn(s.key, r.json)
+          return r.json[field] ?? []
+        })
+      )
+      return res.json({ [field]: parts.flat() })
+    }
+
+    const server = await ctx.registry.resolvePathAsync(req.path)
     const path = req.smPath
 
     if (STREAM_PATHS.some((p) => p.test(req.path))) {

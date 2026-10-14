@@ -50,7 +50,7 @@ export function itemRoutes(ctx: Context): Router {
 
   // Item detail: inject our progress when the client asked for it.
   r.get('/items/:id', async (req, res) => {
-    const server = ctx.registry.resolvePath(req.path)
+    const server = await ctx.registry.resolvePathAsync(req.path)
     const result = await server.forwardJson<LibraryItemJSON & { userMediaProgress?: unknown }>(req, pathWithQuery(req))
     if (result.status !== 200 || !result.json) return sendResult(res, result)
     ctx.registry.learn(server.key, result.json)
@@ -67,7 +67,7 @@ export function itemRoutes(ctx: Context): Router {
   // Start playback: upstream creates the session under the service account;
   // we re-own it and seed the start position from our progress.
   const play = async (req: Request, res: import('express').Response) => {
-    const server = ctx.registry.resolvePath(req.path)
+    const server = await ctx.registry.resolvePathAsync(req.path)
     const result = await server.forwardJson<SessionJSON>(req, pathWithQuery(req))
     if (result.status !== 200 || !result.json) return sendResult(res, result)
     const session = result.json

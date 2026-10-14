@@ -15,9 +15,22 @@ servers:
     url: https://abs.example.com
     apiKey: eyJhbGciOi...
     label: Home
+  bob:
+    url: https://abs.bob.example
+    apiKey: eyJhbGciOi...
+    label: Bob
+
+# Prefix library names with the server label ("Bob: Audiobooks").
+# Defaults to on when there is more than one server.
+prefixLibraryNames: true
 
 # People who log into ShelfMerge. Progress and bookmarks are kept per
 # ShelfMerge user; upstream only ever sees the service account.
+# `libraries` limits what a user sees: "<serverKey>:*", "<serverKey>:<library name>"
+# or "<serverKey>:<library id>". Omit it for access to everything.
 users:
   adam:
     password: change-me
+  guest:
+    password: change-me-too
+    libraries: [home:Audiobooks, bob:*]

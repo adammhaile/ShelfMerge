@@ -3,7 +3,7 @@ import { loadConfig } from './config.js'
 import { openDb } from './db.js'
 import { UpstreamServer } from './upstream/server.js'
 import { Registry } from './upstream/registry.js'
-import { SettingsCache } from './upstream/settings.js'
+import { Catalog } from './upstream/catalog.js'
 import { TokenManager } from './auth/tokens.js'
 import { ProgressStore } from './progress.js'
 import { UserStore } from './users.js'
@@ -26,12 +26,22 @@ async function main() {
   const users = new UserStore(db, tokens, progress)
   users.syncFromConfig(cfg)
   const sessions = new PlaybackSessions(db)
-  const settings = new SettingsCache(registry)
+  const catalog = new Catalog(registry, cfg)
   const socket = new SocketHub(tokens, users, registry)
 
-  const ctx: Context = { cfg, db, registry, tokens, users, progress, sessions, socket, settings, absVersion: ABS_VERSION }
+  // Library events carry upstream names; present them like /api/libraries does,
+  // and refresh the cached list so new or renamed libraries show up at once.
+  socket.onUpstreamEvent = (serverKey, event, payload) => {
+    if (/^library_(added|updated|removed)$/.test(event)) {
+      catalog.refreshServer(serverKey).catch(() => {})
+      if (payload && typeof payload === 'object' && 'id' in payload && 'name' in payload) return catalog.decorate(serverKey, payload as never)
+    }
+    return payload
+  }
 
-  await settings.start()
+  const ctx: Context = { cfg, db, registry, tokens, users, progress, sessions, socket, catalog, absVersion: ABS_VERSION }
+
+  await catalog.start()
   for (const s of servers) {
     try {
       const status = await s.get<{ serverVersion: string }>('/status')
@@ -48,7 +58,7 @@ async function main() {
 
   const shutdown = async () => {
     log.info('shutting down')
-    settings.stop()
+    catalog.stop()
     await socket.close()
     server.close()
     db.close()
