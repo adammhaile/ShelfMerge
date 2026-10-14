@@ -7,6 +7,7 @@ import { authRoutes } from './auth/routes.js'
 import { authMiddleware } from './auth/middleware.js'
 import { meRoutes } from './routes/me.js'
 import { libraryRoutes } from './routes/libraries.js'
+import { mergedRoutes } from './routes/merged.js'
 import { collectionRoutes } from './routes/collections.js'
 import { itemRoutes } from './routes/items.js'
 import { apiForward, sessionForward } from './routes/forward.js'
@@ -96,6 +97,7 @@ export function createApp(ctx: Context) {
   const api = express.Router()
   api.use(authMiddleware(ctx))
   api.use(meRoutes(ctx))
+  api.use(mergedRoutes(ctx))
   api.use(libraryRoutes(ctx))
   api.use(collectionRoutes(ctx))
   api.use(itemRoutes(ctx))

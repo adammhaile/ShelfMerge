@@ -65,6 +65,18 @@ export function itemRoutes(ctx: Context): Router {
     }
   }
 
+  /**
+   * When the user is browsing a merged library that contains this item's
+   * source library, present the item as the merged library's so the web
+   * client stays where it is.
+   */
+  const presentedLibraryId = (userId: string, sourceLibraryId: string | undefined): string | undefined => {
+    const last = ctx.lastLibrary.get(userId)
+    if (!last || !sourceLibraryId) return undefined
+    const lib = ctx.catalog.get(last)
+    return lib?.merged && lib.sources?.some((s) => s.libraryId === sourceLibraryId) ? lib.id : undefined
+  }
+
   // Item detail: inject our progress when the client asked for it.
   r.get('/items/:id', async (req, res) => {
     const server = await ctx.registry.resolvePathAsync(req.path)
@@ -78,6 +90,8 @@ export function itemRoutes(ctx: Context): Router {
       const episodeId = typeof req.query.episode === 'string' ? req.query.episode : null
       result.json.userMediaProgress = ctx.progress.get(req.smUser.id, req.params.id, episodeId)
     }
+    const presented = presentedLibraryId(req.smUser.id, result.json.libraryId)
+    if (presented) result.json.libraryId = presented
     sendResult(res, result, result.json)
   })
 
@@ -100,6 +114,11 @@ export function itemRoutes(ctx: Context): Router {
     if (session.libraryItem) {
       ;(session.libraryItem as { userMediaProgress?: unknown }).userMediaProgress = mp
     }
+    const presented = presentedLibraryId(req.smUser.id, session.libraryId)
+    if (presented) {
+      session.libraryId = presented
+      if (session.libraryItem) session.libraryItem.libraryId = presented
+    }
 
     const mediaItemId = episodeId ?? session.bookId ?? session.libraryItem?.media?.id
     const { libraryItem: _li, ...snapshot } = session
@@ -107,7 +126,7 @@ export function itemRoutes(ctx: Context): Router {
       id: session.id,
       serverKey: server.key,
       userId: req.smUser.id,
-      libraryId: session.libraryId ?? '',
+      libraryId: ctx.registry.lookup(session.libraryItemId)?.libraryId ?? session.libraryId ?? '',
       libraryItemId: session.libraryItemId,
       episodeId: episodeId ?? '',
       mediaItemId: String(mediaItemId ?? ''),

@@ -9,6 +9,9 @@ import type { SocketHub } from './socket/hub.js'
 import type { Catalog } from './upstream/catalog.js'
 import type { ListeningHistory } from './history.js'
 import type { CollectionStore } from './collections.js'
+import type { IndexStore } from './index/store.js'
+import type { IndexQuery } from './index/query.js'
+import type { Indexer } from './index/sync.js'
 import type { UserRow } from './db.js'
 
 /** Everything a route handler needs, built once in index.ts. */
@@ -24,6 +27,15 @@ export interface Context {
   catalog: Catalog
   history: ListeningHistory
   collections: CollectionStore
+  indexStore: IndexStore
+  indexQuery: IndexQuery
+  indexer: Indexer
+  /**
+   * Library each user browsed last. Item detail and playback responses are
+   * relabelled to a merged library when the user is browsing one, so the
+   * web client does not switch libraries when an item page opens.
+   */
+  lastLibrary: Map<string, string>
   /** Audiobookshelf version of the bundled web client; reported in /status. */
   absVersion: string
 }

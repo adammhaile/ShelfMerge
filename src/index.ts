@@ -12,14 +12,21 @@ import { UserStore } from './users.js'
 import { PlaybackSessions } from './sessions.js'
 import { ListeningHistory } from './history.js'
 import { CollectionStore } from './collections.js'
+import { IndexStore } from './index/store.js'
+import { IndexQuery } from './index/query.js'
+import { Indexer } from './index/sync.js'
 import { SocketHub } from './socket/hub.js'
 import { createApp, BASE_PATH } from './app.js'
+import { relabel } from './routes/merged.js'
 import type { Context } from './context.js'
 import { log } from './logger.js'
 
 /** Version of the Audiobookshelf web client bundled with the image. */
 const ABS_VERSION = process.env.ABS_VERSION ?? '2.37.1'
 const CONFIG_FILE = process.env.SHELFMERGE_CONFIG ?? 'config/shelfmerge.yaml'
+
+/** Events whose payload is a library item (or a list of them) with a libraryId. */
+const ITEM_EVENTS = /^(item_added|item_updated|item_removed|items_added|items_updated)$/
 
 async function main() {
   const cfg = loadConfig(CONFIG_FILE)
@@ -34,19 +41,38 @@ async function main() {
   const history = new ListeningHistory(db)
   const collections = new CollectionStore(db)
   const catalog = new Catalog(registry, cfg)
+  const indexStore = new IndexStore(db, () => catalog.sortingPrefixes)
+  const indexQuery = new IndexQuery(indexStore, progress, () => catalog.sortingPrefixes, () => catalog.sortingIgnorePrefix)
+  const indexer = new Indexer(indexStore, registry, catalog, () => catalog.sortingPrefixes)
   const socket = new SocketHub(tokens, users, registry)
 
-  // Library events carry upstream names; present them like /api/libraries does,
-  // and refresh the cached list so new or renamed libraries show up at once.
   socket.onUpstreamEvent = (serverKey, event, payload) => {
+    // Library events carry upstream names; present them like /api/libraries does,
+    // and refresh the cached list so new or renamed libraries show up at once.
     if (/^library_(added|updated|removed)$/.test(event)) {
       catalog.refreshServer(serverKey).catch(() => {})
+      if (event === 'library_removed') indexer.onEvent(serverKey, event, payload)
       if (payload && typeof payload === 'object' && 'id' in payload && 'name' in payload) return catalog.decorate(serverKey, payload as never)
+      return payload
     }
+    indexer.onEvent(serverKey, event, payload)
+    // Item events: clients ignore events for libraries they are not viewing, so
+    // echo each one under every merged library that contains the item's library.
+    if (ITEM_EVENTS.test(event)) {
+      const list = Array.isArray(payload) ? (payload as Array<{ libraryId?: string }>) : [payload as { libraryId?: string }]
+      const sourceIds = new Set(list.map((li) => li?.libraryId).filter((x): x is string => !!x))
+      for (const id of sourceIds) indexQuery.invalidate(id)
+      const variants: unknown[] = [payload]
+      const mergedIds = new Set<string>()
+      for (const id of sourceIds) for (const m of catalog.mergedContaining(id)) mergedIds.add(m.id)
+      for (const mid of mergedIds) variants.push(Array.isArray(payload) ? list.map((li) => relabel(li, mid)) : relabel(payload as { libraryId?: unknown }, mid))
+      return variants
+    }
+    if (/^(series|author)_/.test(event)) indexQuery.invalidate()
     return payload
   }
 
-  const ctx: Context = { cfg, db, registry, tokens, users, progress, sessions, socket, catalog, history, collections, absVersion: ABS_VERSION }
+  const ctx: Context = { cfg, db, registry, tokens, users, progress, sessions, socket, catalog, history, collections, indexStore, indexQuery, indexer, lastLibrary: new Map(), absVersion: ABS_VERSION }
 
   await catalog.start()
   for (const s of servers) {
@@ -57,17 +83,25 @@ async function main() {
       log.warn(`[upstream:${s.key}] ${s.url} unreachable:`, (err as Error).message)
     }
   }
+  for (const m of catalog.mergedLibraries()) log.info(`[catalog] merged library "${m.name}" (${m.id}) <- ${m.sources!.map((s) => `${s.serverKey}/${s.libraryId.slice(0, 8)}`).join(', ') || 'no sources'}`)
 
   const app = createApp(ctx)
   const server = http.createServer(app)
   socket.attach(server, BASE_PATH)
   server.listen(cfg.port, () => log.info(`ShelfMerge listening on :${cfg.port}, base path "${BASE_PATH || '/'}" (${servers.length} upstream server${servers.length === 1 ? '' : 's'})`))
 
+  // The index fills in the background; merged libraries serve whatever is indexed so far.
+  indexer
+    .start()
+    .then(() => indexQuery.invalidate())
+    .catch((err) => log.warn('[index] initial pull failed:', (err as Error).message))
+
   watchConfig(ctx)
 
   const shutdown = async () => {
     log.info('shutting down')
     catalog.stop()
+    indexer.stop()
     await socket.close()
     server.close()
     db.close()
@@ -78,8 +112,9 @@ async function main() {
 }
 
 /**
- * Re-read the config when the file changes: users and servers can be added,
- * removed or re-keyed without a restart. Port and data paths need one.
+ * Re-read the config when the file changes: users, servers and merged
+ * libraries can be added, removed or re-keyed without a restart. Port and
+ * data paths need one.
  */
 function watchConfig(ctx: Context) {
   const file = path.resolve(CONFIG_FILE)
@@ -94,6 +129,7 @@ function watchConfig(ctx: Context) {
     }
     ctx.cfg.users = next.users
     ctx.cfg.prefixLibraryNames = next.prefixLibraryNames
+    ctx.cfg.merged = next.merged
     ctx.users.syncFromConfig(next)
     const change = ctx.registry.setServers(next.servers.map((s) => new UpstreamServer(s)))
     ctx.cfg.servers = next.servers
@@ -101,8 +137,12 @@ function watchConfig(ctx: Context) {
       log.info(`[config] servers added=${change.added.join(',') || '-'} removed=${change.removed.join(',') || '-'} changed=${change.changed.join(',') || '-'}`)
       ctx.socket.reconnectUpstreams()
     }
-    ctx.catalog.refreshAll().catch(() => {})
-    log.info(`[config] reloaded: ${next.servers.length} servers, ${next.users.length} users`)
+    ctx.catalog
+      .refreshAll()
+      .then(() => ctx.indexer.reconcileAll(60 * 60 * 1000))
+      .then(() => ctx.indexQuery.invalidate())
+      .catch(() => {})
+    log.info(`[config] reloaded: ${next.servers.length} servers, ${next.users.length} users, ${next.merged.length} merged libraries`)
   }
   // Polling rather than inotify: it also works on bind mounts and network
   // filesystems (Docker volumes, WSL drvfs) where change events never arrive.

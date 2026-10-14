@@ -13,23 +13,25 @@ export function libraryRoutes(ctx: Context): Router {
   const r = Router()
 
   r.get('/libraries', (req, res) => {
-    res.json({ libraries: ctx.catalog.forUser(ctx.users.config(req.smUser)) })
+    res.json({ libraries: ctx.catalog.forUser(ctx.users.config(req.smUser)).map(({ serverKey, upstreamName, merged, sources, ...lib }) => lib) })
   })
 
   r.use('/libraries/:id', (req, res, next) => {
     const lib = ctx.catalog.get(req.params.id)
     if (!lib) return res.sendStatus(404)
     if (!ctx.catalog.canAccess(ctx.users.config(req.smUser), lib.id)) return res.sendStatus(403)
+    ctx.lastLibrary.set(req.smUser.id, lib.id)
     next()
   })
 
   // With ?include=filterdata upstream wraps the library: { filterdata, issues, numUserPlaylists, library }.
   r.get('/libraries/:id', async (req, res) => {
     const lib = ctx.catalog.get(req.params.id)!
-    const server = ctx.registry.server(lib.serverKey)!
+    const server = lib.serverKey ? ctx.registry.server(lib.serverKey) : undefined
+    if (!server) return res.sendStatus(404)
     const result = await server.forwardJson<LibraryJSON | { library: LibraryJSON }>(req, req.smPath)
     if (result.status !== 200 || !result.json) return sendResult(res, result)
-    const present = (l: LibraryJSON) => ({ ...ctx.catalog.decorate(lib.serverKey, l, lib.displayOrder), serverKey: undefined, upstreamName: undefined })
+    const present = (l: LibraryJSON) => ({ ...ctx.catalog.decorate(server.key, l, lib.displayOrder), serverKey: undefined, upstreamName: undefined })
     const json = result.json as Record<string, unknown>
     const wrapped = json.library as LibraryJSON | undefined
     const body = wrapped && typeof wrapped === 'object' && 'id' in wrapped ? { ...json, library: present(wrapped) } : present(json as LibraryJSON)

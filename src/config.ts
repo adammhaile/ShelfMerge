@@ -19,12 +19,25 @@ export interface UserConfig {
   libraries: string[] | null
 }
 
+/**
+ * A virtual library made from several upstream libraries. `sources` are
+ * `serverKey:*`, `serverKey:Library Name` or `serverKey:<libraryId>`; `*`
+ * alone means every library of the matching media type on every server.
+ */
+export interface MergedLibraryConfig {
+  name: string
+  mediaType: 'book' | 'podcast'
+  sources: string[]
+}
+
 export interface Config {
   port: number
   dataDir: string
   clientDir: string
   servers: ServerConfig[]
   users: UserConfig[]
+  /** Merged libraries, listed first and default. Defaults to one "Everything" over all book libraries. */
+  merged: MergedLibraryConfig[]
   /** Prefix library names with the server label. Defaults to on when there is more than one server. */
   prefixLibraryNames: boolean
   /** Seconds. Defaults match Audiobookshelf (1 h access, 30 d refresh). */
@@ -39,6 +52,7 @@ interface RawConfig {
   clientDir?: string
   servers?: Record<string, { url: string; apiKey: string; label?: string }>
   users?: Record<string, { password: string; libraries?: string[] }>
+  merged?: Array<{ name?: string; mediaType?: string; sources?: string[] }>
   prefixLibraryNames?: boolean
   accessTokenExpiry?: number
   refreshTokenExpiry?: number
@@ -61,11 +75,26 @@ export function loadConfig(file = process.env.SHELFMERGE_CONFIG ?? 'config/shelf
     const libraries = u.libraries ? u.libraries.map(String) : null
     for (const rule of libraries ?? []) {
       const key = rule.split(':')[0]
-      if (!rule.includes(':') || !servers.some((s) => s.key === key)) throw new Error(`Config: user "${username}" library rule "${rule}" must be "<serverKey>:<library name, id or *>"`)
+      if (!rule.includes(':') || (key !== 'merged' && !servers.some((s) => s.key === key))) throw new Error(`Config: user "${username}" library rule "${rule}" must be "<serverKey|merged>:<library name, id or *>"`)
     }
     return { username, password: String(u.password), libraries }
   })
   if (!users.length) throw new Error('Config: at least one user is required')
+
+  const merged: MergedLibraryConfig[] = (raw.merged ?? [{ name: 'Everything', mediaType: 'book', sources: ['*'] }]).map((m, i) => {
+    const mediaType = m.mediaType === 'podcast' ? 'podcast' : 'book'
+    const sources = (m.sources ?? ['*']).map(String)
+    for (const rule of sources) {
+      const key = rule.split(':')[0]
+      if (rule !== '*' && (!rule.includes(':') || !servers.some((s) => s.key === key))) throw new Error(`Config: merged library #${i + 1} source "${rule}" must be "*" or "<serverKey>:<library name, id or *>"`)
+    }
+    return { name: m.name?.trim() || 'Everything', mediaType, sources }
+  })
+  const names = new Set<string>()
+  for (const m of merged) {
+    if (names.has(m.name.toLowerCase())) throw new Error(`Config: merged library name "${m.name}" is used twice`)
+    names.add(m.name.toLowerCase())
+  }
 
   const resolveDir = (d: string | undefined, fallback: string) => path.resolve(baseDir, '..', d ?? fallback)
 
@@ -75,6 +104,7 @@ export function loadConfig(file = process.env.SHELFMERGE_CONFIG ?? 'config/shelf
     clientDir: process.env.SHELFMERGE_CLIENT_DIR ?? resolveDir(raw.clientDir, 'client-dist'),
     servers,
     users,
+    merged,
     prefixLibraryNames: raw.prefixLibraryNames ?? servers.length > 1,
     accessTokenExpiry: raw.accessTokenExpiry ?? 60 * 60,
     refreshTokenExpiry: raw.refreshTokenExpiry ?? 30 * 24 * 60 * 60,

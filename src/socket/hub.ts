@@ -30,8 +30,12 @@ export class SocketHub {
   private readonly servers: Server[] = []
   private readonly clients = new Map<string, Client>()
   private readonly upstreams: ClientSocket[] = []
-  /** Optional hook to rewrite an upstream event's payload before it is relayed. */
-  onUpstreamEvent: ((serverKey: string, event: string, payload: unknown) => unknown) | null = null
+  /**
+   * Optional hook to rewrite an upstream event's payload before it is
+   * relayed. May return several payloads; each is emitted as its own event
+   * (used to echo item events under merged library ids).
+   */
+  onUpstreamEvent: ((serverKey: string, event: string, payload: unknown) => unknown | unknown[]) | null = null
 
   constructor(
     private readonly tokens: TokenManager,
@@ -102,7 +106,12 @@ export class SocketHub {
       s.onAny((event: string, ...args: unknown[]) => {
         if (DROP_UPSTREAM.test(event)) return
         if (args.length && args[0] && typeof args[0] === 'object') this.registry.learn(server.key, args[0])
-        if (this.onUpstreamEvent && args.length) args[0] = this.onUpstreamEvent(server.key, event, args[0])
+        if (this.onUpstreamEvent && args.length) {
+          const out = this.onUpstreamEvent(server.key, event, args[0])
+          const variants = Array.isArray(out) && !Array.isArray(args[0]) ? out : [out]
+          for (const v of variants) this.broadcast(event, v, ...args.slice(1))
+          return
+        }
         this.broadcast(event, ...args)
       })
       this.upstreams.push(s)

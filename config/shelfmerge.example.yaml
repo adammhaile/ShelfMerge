@@ -24,13 +24,25 @@ servers:
 # Defaults to on when there is more than one server.
 prefixLibraryNames: true
 
+# Merged (virtual) libraries, listed first and used as the default library.
+# Each combines the matching upstream libraries into one. Sources are
+# "<serverKey>:*", "<serverKey>:<library name>", "<serverKey>:<library id>",
+# or "*" for every library of that media type on every server.
+# Omit this key for a single "Everything" over all book libraries; set
+# `merged: []` to have none.
+merged:
+  - name: Everything
+    mediaType: book
+    sources: ['*']
+
 # People who log into ShelfMerge. Progress and bookmarks are kept per
 # ShelfMerge user; upstream only ever sees the service account.
-# `libraries` limits what a user sees: "<serverKey>:*", "<serverKey>:<library name>"
-# or "<serverKey>:<library id>". Omit it for access to everything.
+# `libraries` limits what a user sees: "<serverKey>:*", "<serverKey>:<library name>",
+# "<serverKey>:<library id>", or "merged:*" / "merged:<name>" for merged
+# libraries. Omit it for access to everything.
 users:
   adam:
     password: change-me
   guest:
     password: change-me-too
-    libraries: [home:Audiobooks, bob:*]
+    libraries: [merged:Everything, home:Audiobooks]
