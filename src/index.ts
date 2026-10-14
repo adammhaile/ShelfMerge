@@ -9,7 +9,7 @@ import { ProgressStore } from './progress.js'
 import { UserStore } from './users.js'
 import { PlaybackSessions } from './sessions.js'
 import { SocketHub } from './socket/hub.js'
-import { createApp } from './app.js'
+import { createApp, BASE_PATH } from './app.js'
 import type { Context } from './context.js'
 import { log } from './logger.js'
 
@@ -43,8 +43,8 @@ async function main() {
 
   const app = createApp(ctx)
   const server = http.createServer(app)
-  socket.attach(server)
-  server.listen(cfg.port, () => log.info(`ShelfMerge listening on :${cfg.port} (${servers.length} upstream server${servers.length === 1 ? '' : 's'})`))
+  socket.attach(server, BASE_PATH)
+  server.listen(cfg.port, () => log.info(`ShelfMerge listening on :${cfg.port}, base path "${BASE_PATH || '/'}" (${servers.length} upstream server${servers.length === 1 ? '' : 's'})`))
 
   const shutdown = async () => {
     log.info('shutting down')

@@ -35,12 +35,36 @@ const SPA_ROUTES = [
   '/share/:slug'
 ]
 
+/**
+ * The stock web client is built with this router base path, so its assets and
+ * API calls are prefixed with it. Like upstream, bare URLs (mobile apps,
+ * older clients) are rewritten to include it, so both forms work.
+ */
+export const BASE_PATH = normalizeBasePath(process.env.ROUTER_BASE_PATH ?? '/audiobookshelf')
+
+function normalizeBasePath(p: string): string {
+  const t = p.trim()
+  if (!t || t === '/') return ''
+  const lead = t.startsWith('/') ? t : `/${t}`
+  return lead.endsWith('/') ? lead.slice(0, -1) : lead
+}
+
 export function createApp(ctx: Context) {
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', true)
 
-  app.use((req, res, next) => {
+  app.use((req, _res, next) => {
+    const hasBase = BASE_PATH && (req.url === BASE_PATH || req.url.startsWith(BASE_PATH + '/') || req.url.startsWith(BASE_PATH + '?'))
+    req.smPath = hasBase ? req.url.slice(BASE_PATH.length) || '/' : req.url
+    if (BASE_PATH && !hasBase) req.url = BASE_PATH + req.url
+    next()
+  })
+
+  const root = express.Router()
+  app.use(BASE_PATH || '/', root)
+
+  root.use((req, res, next) => {
     res.setHeader('Referrer-Policy', 'no-referrer')
     // Same CORS carve-out as upstream for the mobile ereader and cover colour extraction.
     if (/\/api\/items\/[a-z0-9-]{36}\/(ebook|cover)(\/[0-9]+)?/.test(req.path)) {
@@ -56,36 +80,36 @@ export function createApp(ctx: Context) {
     next()
   })
 
-  app.use(cookieParser())
-  app.use(express.json({ limit: '10mb' }))
-  app.use(express.urlencoded({ extended: true, limit: '5mb' }))
+  root.use(cookieParser())
+  root.use(express.json({ limit: '10mb' }))
+  root.use(express.urlencoded({ extended: true, limit: '5mb' }))
 
-  app.use((req, _res, next) => {
-    log.debug(`${req.method} ${req.originalUrl}`)
+  root.use((req, _res, next) => {
+    log.debug(`${req.method} ${req.smPath}`)
     next()
   })
 
-  app.use(authRoutes(ctx))
+  root.use(authRoutes(ctx))
 
   const api = express.Router()
   api.use(authMiddleware(ctx))
   api.use(meRoutes(ctx))
   api.use(itemRoutes(ctx))
   api.use(apiForward(ctx))
-  app.use('/api', api)
+  root.use('/api', api)
 
-  app.use('/hls', sessionForward(ctx, '/hls'))
-  app.use('/public', sessionForward(ctx, '/public'))
-  app.use('/feed', (req, res) => ctx.registry.default.relay(req, res, '/feed' + req.url))
+  root.use('/hls', sessionForward(ctx, '/hls'))
+  root.use('/public', sessionForward(ctx, '/public'))
+  root.use('/feed', (req, res) => ctx.registry.default.relay(req, res, '/feed' + req.url))
 
   const clientDir = ctx.cfg.clientDir
   const indexHtml = path.join(clientDir, 'index.html')
   if (fs.existsSync(indexHtml)) {
-    app.use(express.static(clientDir))
-    for (const route of SPA_ROUTES) app.get(route, (_req, res) => res.sendFile(indexHtml))
+    root.use(express.static(clientDir))
+    for (const route of SPA_ROUTES) root.get(route, (_req, res) => res.sendFile(indexHtml))
   } else {
     log.warn(`[app] web client not found at ${clientDir}; run scripts/fetch-client.sh`)
-    app.get('/', (_req, res) => res.status(503).send('ShelfMerge: web client not installed'))
+    root.get('/', (_req, res) => res.status(503).send('ShelfMerge: web client not installed'))
   }
 
   return app

@@ -38,7 +38,7 @@ interface Shelf {
   total?: number
 }
 
-const pathWithQuery = (req: Request) => req.originalUrl
+const pathWithQuery = (req: Request) => req.smPath
 
 /**
  * Item, playback and personalized routes: forwarded upstream, with the

@@ -27,7 +27,7 @@ const DROP_UPSTREAM = /^(init|auth_failed|user_|users_online|admin_message|log|b
  * as they would against Audiobookshelf.
  */
 export class SocketHub {
-  private io!: Server
+  private readonly servers: Server[] = []
   private readonly clients = new Map<string, Client>()
   private readonly upstreams: ClientSocket[] = []
 
@@ -37,20 +37,28 @@ export class SocketHub {
     private readonly registry: Registry
   ) {}
 
-  attach(httpServer: HttpServer) {
-    this.io = new Server(httpServer, { cors: { origin: '*', methods: ['GET', 'POST'] } })
-    this.io.on('connection', (socket) => {
-      this.clients.set(socket.id, { socket })
-      log.debug(`[socket] connected ${socket.id}`)
+  /**
+   * Like upstream: one socket.io server at /socket.io for the mobile apps and
+   * one at <basePath>/socket.io for the web client.
+   */
+  attach(httpServer: HttpServer, basePath: string) {
+    const paths = ['/socket.io', ...(basePath ? [`${basePath}/socket.io`] : [])]
+    for (const path of paths) {
+      const io = new Server(httpServer, { path, cors: { origin: '*', methods: ['GET', 'POST'] } })
+      io.on('connection', (socket) => {
+        this.clients.set(socket.id, { socket })
+        log.debug(`[socket] connected ${socket.id} on ${path}`)
 
-      socket.on('auth', (token: unknown) => this.authenticate(socket, token))
-      socket.on('ping', () => socket.emit('pong'))
-      socket.on('disconnect', (reason) => {
-        const c = this.clients.get(socket.id)
-        log.debug(`[socket] ${c?.username ?? 'unauth'} disconnected (${reason})`)
-        this.clients.delete(socket.id)
+        socket.on('auth', (token: unknown) => this.authenticate(socket, token))
+        socket.on('ping', () => socket.emit('pong'))
+        socket.on('disconnect', (reason) => {
+          const c = this.clients.get(socket.id)
+          log.debug(`[socket] ${c?.username ?? 'unauth'} disconnected (${reason})`)
+          this.clients.delete(socket.id)
+        })
       })
-    })
+      this.servers.push(io)
+    }
     this.connectUpstreams()
   }
 
@@ -103,6 +111,6 @@ export class SocketHub {
 
   async close() {
     for (const s of this.upstreams) s.close()
-    await new Promise<void>((resolve) => this.io.close(() => resolve()))
+    await Promise.all(this.servers.map((io) => new Promise<void>((resolve) => io.close(() => resolve()))))
   }
 }

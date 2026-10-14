@@ -26,7 +26,7 @@ export function apiForward(ctx: Context) {
     if (req.method === 'GET' && req.path in STUBS) return res.json(STUBS[req.path])
 
     const server = ctx.registry.resolvePath(req.path)
-    const path = '/api' + req.originalUrl.replace(/^\/api/, '')
+    const path = req.smPath
 
     if (STREAM_PATHS.some((p) => p.test(req.path))) {
       return server.relay(req, res, stripToken(path))
@@ -44,9 +44,9 @@ export function apiForward(ctx: Context) {
 }
 
 /** /hls/:session/:file and /public/session/:id/track/:i route by session id. */
-export function sessionForward(ctx: Context, prefix: '/hls' | '/public') {
+export function sessionForward(ctx: Context, _prefix: '/hls' | '/public') {
   return (req: Request, res: Response) => {
-    const path = prefix + req.originalUrl.replace(new RegExp(`^${prefix}`), '')
+    const path = req.smPath
     const m = /^\/(?:session\/)?([0-9a-f-]{36})/i.exec(req.path)
     const row = m ? ctx.sessions.get(m[1]) : undefined
     const server = row ? ctx.registry.server(row.serverKey) : ctx.registry.resolvePath(req.path)

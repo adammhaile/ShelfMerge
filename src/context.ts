@@ -28,6 +28,8 @@ declare global {
   namespace Express {
     interface Request {
       smUser: UserRow
+      /** Client path + query with the router base path removed, e.g. `/api/libraries?x=1`. */
+      smPath: string
     }
   }
 }
