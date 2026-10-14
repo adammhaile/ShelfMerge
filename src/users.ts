@@ -28,10 +28,14 @@ export interface OldUserJSON {
   refreshToken?: string | null
 }
 
-/** Permissions a ShelfMerge user reports to clients. Writes are hidden in the UI. */
+/**
+ * Permissions a ShelfMerge user reports to clients. `update` is on so the
+ * "add to collection" UI appears; the forwarder refuses every other write
+ * before it reaches an upstream server.
+ */
 export const USER_PERMISSIONS = {
   download: true,
-  update: false,
+  update: true,
   delete: false,
   upload: false,
   createEreader: false,
@@ -72,8 +76,13 @@ export class UserStore {
     }
   }
 
+  /**
+   * A user removed from the config keeps their rows (progress, history) but
+   * can no longer log in or use existing tokens.
+   */
   byId(id: string): UserRow | undefined {
-    return this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined
+    const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined
+    return user && this.configs.has(user.username) ? user : undefined
   }
 
   byUsername(username: string): UserRow | undefined {
@@ -81,6 +90,7 @@ export class UserStore {
   }
 
   authenticate(username: string, password: string): UserRow | null {
+    if (!this.configs.has(username)) return null
     const user = this.byUsername(username)
     if (!user || !bcrypt.compareSync(password, user.passwordHash)) return null
     return user

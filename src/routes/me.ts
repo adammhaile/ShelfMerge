@@ -55,20 +55,27 @@ export function meRoutes(ctx: Context): Router {
     res.json({ bookmarks: ctx.progress.bookmarksForUser(req.smUser.id).filter((b) => b.libraryItemId === req.params.libraryItemId) })
   })
 
-  // Listening history is not tracked by the proxy yet.
-  r.get('/me/listening-sessions', (req, res) => {
-    const itemsPerPage = Math.max(1, Number(req.query.itemsPerPage) || 10)
-    res.json({ total: 0, numPages: 0, page: 0, itemsPerPage, sessions: [] })
-  })
-  r.get('/me/item/listening-sessions/:libraryItemId/:episodeId?', (req, res) => {
-    const itemsPerPage = Math.max(1, Number(req.query.itemsPerPage) || 10)
-    res.json({ total: 0, numPages: 0, page: 0, itemsPerPage, sessions: [] })
-  })
-  r.get('/me/listening-stats', (_req, res) => {
-    res.json({ totalTime: 0, items: {}, days: {}, dayOfWeek: {}, today: 0, recentSessions: [] })
-  })
-  r.get('/me/stats/year/:year', (_req, res) => {
-    res.json({ totalListeningSessions: 0, totalListeningTime: 0, totalBooksListened: 0, totalBooksFinished: 0, topAuthors: [], topNarrators: [], topGenres: [], listeningSessions: [], finishedItems: [] })
+  const paged = (req: import('express').Request, sessions: unknown[]) => {
+    const itemsPerPage = Number(req.query.itemsPerPage) || 10
+    const page = Number(req.query.page) || 0
+    return { total: sessions.length, numPages: Math.ceil(sessions.length / itemsPerPage), page, itemsPerPage, sessions: sessions.slice(page * itemsPerPage, (page + 1) * itemsPerPage) }
+  }
+  r.get('/me/listening-sessions', (req, res) => res.json(paged(req, ctx.history.forUser(req.smUser.id))))
+  r.get('/me/item/listening-sessions/:libraryItemId/:episodeId?', (req, res) => res.json(paged(req, ctx.history.forItem(req.smUser.id, req.params.libraryItemId, req.params.episodeId ?? null))))
+  r.get('/me/listening-stats', (req, res) => res.json(ctx.history.stats(req.smUser.id)))
+  r.get('/me/stats/year/:year', async (req, res) => {
+    const year = Number(req.params.year)
+    if (Number.isNaN(year) || year < 2000 || year > 9999) return res.status(400).send('Invalid year')
+    const from = new Date(year, 0, 1).valueOf()
+    const to = new Date(year + 1, 0, 1).valueOf()
+    const finishedRows = ctx.progress.rowsForUser(req.smUser.id).filter((mp) => mp.isFinished && mp.mediaItemType === 'book' && mp.finishedAt && mp.finishedAt >= from && mp.finishedAt < to)
+    const items = await fetchItems(ctx, [...new Set(finishedRows.map((mp) => mp.libraryItemId))])
+    const finished = finishedRows.map((mp) => {
+      const li = items.get(mp.libraryItemId)
+      const meta = (li?.media.metadata ?? {}) as { title?: string }
+      return { libraryItemId: mp.libraryItemId, mediaItemId: mp.mediaItemId, duration: mp.duration, finishedAt: mp.finishedAt!, title: meta.title ?? '', hasCover: !!li?.media.coverPath }
+    })
+    res.json(ctx.history.yearStats(req.smUser.id, year, finished))
   })
 
   r.get('/me/progress/:id/remove-from-continue-listening', (req, res) => {
@@ -110,7 +117,14 @@ export function meRoutes(ctx: Context): Router {
   r.patch('/me/progress/:libraryItemId/:episodeId?', async (req, res) => {
     const resolved = await resolveMediaItemId(ctx, req.params.libraryItemId, req.params.episodeId ?? null)
     if (!resolved) return res.status(404).send('Library item not found')
-    ctx.progress.createUpdate(req.smUser.id, resolved.serverKey, resolved.mediaItemId, { ...(req.body as object), libraryItemId: req.params.libraryItemId, episodeId: req.params.episodeId ?? null })
+    const settings = (ctx.catalog.get(ctx.registry.lookup(req.params.libraryItemId)?.libraryId ?? '')?.settings ?? {}) as Record<string, unknown>
+    ctx.progress.createUpdate(req.smUser.id, resolved.serverKey, resolved.mediaItemId, {
+      ...(req.body as object),
+      libraryItemId: req.params.libraryItemId,
+      episodeId: req.params.episodeId ?? null,
+      markAsFinishedTimeRemaining: typeof settings.markAsFinishedTimeRemaining === 'number' ? settings.markAsFinishedTimeRemaining : undefined,
+      markAsFinishedPercentComplete: typeof settings.markAsFinishedPercentComplete === 'number' ? settings.markAsFinishedPercentComplete : undefined
+    })
     emitUserUpdated(req.smUser.id)
     res.sendStatus(200)
   })

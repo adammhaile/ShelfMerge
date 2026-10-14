@@ -81,6 +81,13 @@ export class SocketHub {
     socket.emit('init', { userId: user.id, username: user.username })
   }
 
+  /** Drop every upstream connection and connect to the registry's current server set. */
+  reconnectUpstreams() {
+    for (const s of this.upstreams) s.close()
+    this.upstreams.length = 0
+    this.connectUpstreams()
+  }
+
   private connectUpstreams() {
     for (const server of this.registry.all) {
       const s = ioClient(server.url, { path: '/socket.io', transports: ['websocket'], reconnection: true, reconnectionDelayMax: 30_000 })

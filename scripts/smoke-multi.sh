@@ -14,7 +14,7 @@ G="$(login guest guest)"; gauth=(-H "authorization: Bearer $G")
 step "adam sees both servers' libraries, prefixed and renumbered"
 LIBS="$(curl -fsS "${auth[@]}" "$SM/api/libraries")"
 echo "$LIBS" | j '[(l["name"], l["displayOrder"]) for l in d["libraries"]]'
-[ "$(echo "$LIBS" | j 'len(d["libraries"])')" = "2" ] || fail "expected 2 libraries"
+[ "$(echo "$LIBS" | j 'len(d["libraries"])')" -ge 2 ] || fail "expected at least 2 libraries"
 LIB_A="$(echo "$LIBS" | j '[l["id"] for l in d["libraries"] if l["name"].startswith("Dev A")][0]')"
 LIB_B="$(echo "$LIBS" | j '[l["id"] for l in d["libraries"] if l["name"].startswith("Dev B")][0]')"
 

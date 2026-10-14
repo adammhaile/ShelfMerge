@@ -17,36 +17,24 @@ const STUBS: Record<string, unknown> = {
 }
 
 /**
- * Server-wide lists that have no library id in the path: ask every server
- * and concatenate the named array. Served from whichever servers answer.
- * (/api/tags and /api/genres are admin-only upstream; clients read genres
- * from a library's filterdata instead.)
- */
-const MERGE_LISTS: Record<string, string> = {
-  '/collections': 'collections',
-  '/playlists': 'playlists'
-}
-
-/**
  * Generic /api forwarder for everything the proxy does not interpret.
  * JSON responses are buffered so the registry can learn ids from them;
  * media and files are streamed.
  */
+/**
+ * The only writes that may reach an upstream server. Everything else that
+ * mutates (metadata edits, uploads, scans, deletes, settings) is refused here
+ * so the service account's permissions never matter: ShelfMerge users have
+ * `update` so the collection UI appears, but their edits stop at the proxy.
+ */
+const ALLOWED_WRITES = [/^\/items\/[^/]+\/play(\/|$)/, /^\/items\/batch\/get$/, /^\/session\//, /^\/authorize$/, /^\/podcasts\/feed$/, /^\/podcasts\/opml\/parse$/]
+
 export function apiForward(ctx: Context) {
   return async (req: Request, res: Response, _next: NextFunction) => {
     if (req.method === 'GET' && req.path in STUBS) return res.json(STUBS[req.path])
-
-    if (req.method === 'GET' && req.path in MERGE_LISTS) {
-      const field = MERGE_LISTS[req.path]
-      const parts = await Promise.all(
-        ctx.registry.all.map(async (s) => {
-          const r = await s.json<Record<string, unknown[]>>(req.smPath).catch(() => null)
-          if (r?.status !== 200 || !r.json) return []
-          ctx.registry.learn(s.key, r.json)
-          return r.json[field] ?? []
-        })
-      )
-      return res.json({ [field]: parts.flat() })
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS' && !ALLOWED_WRITES.some((p) => p.test(req.path))) {
+      log.info(`[forward] refused ${req.method} ${req.path} for "${req.smUser?.username}": upstream is read-only through ShelfMerge`)
+      return res.status(403).send('Not allowed through ShelfMerge')
     }
 
     const server = await ctx.registry.resolvePathAsync(req.path)

@@ -24,10 +24,11 @@ export class Registry {
   ) {
     for (const s of servers) this.servers.set(s.key, s)
     this.upsert = db.prepare(
-      `INSERT INTO id_map (id, serverKey, kind, mediaId, seenAt) VALUES (@id, @serverKey, @kind, @mediaId, @seenAt)
-       ON CONFLICT(id) DO UPDATE SET serverKey = excluded.serverKey, kind = COALESCE(excluded.kind, id_map.kind), mediaId = COALESCE(excluded.mediaId, id_map.mediaId), seenAt = excluded.seenAt`
+      `INSERT INTO id_map (id, serverKey, kind, mediaId, libraryId, seenAt) VALUES (@id, @serverKey, @kind, @mediaId, @libraryId, @seenAt)
+       ON CONFLICT(id) DO UPDATE SET serverKey = excluded.serverKey, kind = COALESCE(excluded.kind, id_map.kind), mediaId = COALESCE(excluded.mediaId, id_map.mediaId),
+       libraryId = COALESCE(excluded.libraryId, id_map.libraryId), seenAt = excluded.seenAt`
     )
-    this.selectOne = db.prepare('SELECT id, serverKey, kind, mediaId FROM id_map WHERE id = ?')
+    this.selectOne = db.prepare('SELECT id, serverKey, kind, mediaId, libraryId FROM id_map WHERE id = ?')
   }
 
   get all(): UpstreamServer[] {
@@ -36,6 +37,22 @@ export class Registry {
 
   get default(): UpstreamServer {
     return this.servers.values().next().value as UpstreamServer
+  }
+
+  /** Replace the server set (config reload). Returns the keys that were added or changed. */
+  setServers(servers: UpstreamServer[]): { added: string[]; removed: string[]; changed: string[] } {
+    const added: string[] = []
+    const changed: string[] = []
+    const next = new Map(servers.map((s) => [s.key, s]))
+    for (const s of servers) {
+      const prev = this.servers.get(s.key)
+      if (!prev) added.push(s.key)
+      else if (prev.url !== s.url || prev.authHeader !== s.authHeader) changed.push(s.key)
+    }
+    const removed = [...this.servers.keys()].filter((k) => !next.has(k))
+    this.servers.clear()
+    for (const [k, s] of next) this.servers.set(k, s)
+    return { added, removed, changed }
   }
 
   server(key: string): UpstreamServer | undefined {
@@ -124,11 +141,11 @@ export class Registry {
     }
   }
 
-  record(id: string, serverKey: string, kind: string | null = null, mediaId: string | null = null) {
-    const row: IdMapRow = { id, serverKey, kind, mediaId }
+  record(id: string, serverKey: string, kind: string | null = null, mediaId: string | null = null, libraryId: string | null = null) {
+    const row: IdMapRow = { id, serverKey, kind, mediaId, libraryId }
     const prev = this.cache.get(id)
-    if (prev && prev.serverKey === serverKey && (kind === null || prev.kind === kind) && (mediaId === null || prev.mediaId === mediaId)) return
-    this.cache.set(id, { ...prev, ...row, kind: kind ?? prev?.kind ?? null, mediaId: mediaId ?? prev?.mediaId ?? null })
+    if (prev && prev.serverKey === serverKey && (kind === null || prev.kind === kind) && (mediaId === null || prev.mediaId === mediaId) && (libraryId === null || prev.libraryId === libraryId)) return
+    this.cache.set(id, { id, serverKey, kind: kind ?? prev?.kind ?? null, mediaId: mediaId ?? prev?.mediaId ?? null, libraryId: libraryId ?? prev?.libraryId ?? null })
     this.upsert.run({ ...row, seenAt: Date.now() })
   }
 
@@ -153,17 +170,19 @@ export class Registry {
     if (typeof id === 'string' && UUID_RE.test(id)) {
       let kind: string | null = null
       let mediaId: string | null = null
+      let libraryId: string | null = null
       if (typeof obj.mediaType === 'string' && obj.media && typeof obj.media === 'object') {
         kind = 'item'
         const m = (obj.media as Record<string, unknown>).id
         if (typeof m === 'string') mediaId = m
+        if (typeof obj.libraryId === 'string') libraryId = obj.libraryId
       } else if (Array.isArray(obj.folders)) kind = 'library'
       else if ('libraryItemId' in obj && 'audioTracks' in obj) kind = 'session'
       else if ('books' in obj && 'libraryId' in obj) kind = 'collection'
       else if ('items' in obj && 'userId' in obj) kind = 'playlist'
       else if ('numBooks' in obj || ('imagePath' in obj && 'name' in obj)) kind = 'author'
       else if ('sequence' in obj && 'name' in obj) kind = 'series'
-      this.record(id, serverKey, kind, mediaId)
+      this.record(id, serverKey, kind, mediaId, libraryId)
     }
     for (const value of Object.values(obj)) {
       if (value && typeof value === 'object') this.walk(serverKey, value, depth + 1)

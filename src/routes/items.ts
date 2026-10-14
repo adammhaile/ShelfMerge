@@ -1,11 +1,12 @@
-import { Router, type Request } from 'express'
+import { Router, type Request, type Response } from 'express'
 import type { Context } from '../context.js'
 import { sendResult } from '../upstream/server.js'
 import { resolveMediaItemId, fetchItems, type LibraryItemJSON } from './items-helpers.js'
 import type { PlaybackSessionRow } from '../db.js'
+import type { SessionSnapshot } from '../history.js'
 import { log } from '../logger.js'
 
-interface SessionJSON {
+interface SessionJSON extends SessionSnapshot {
   id: string
   userId: string
   libraryId: string
@@ -38,15 +39,31 @@ interface Shelf {
   total?: number
 }
 
+interface SeriesRef {
+  id: string
+  name: string
+  sequence: string | null
+}
+
 const pathWithQuery = (req: Request) => req.smPath
+const b64 = (s: string) => encodeURIComponent(Buffer.from(s).toString('base64'))
 
 /**
- * Item, playback and personalized routes: forwarded upstream, with the
- * service account's progress replaced by the ShelfMerge user's wherever it
- * leaks into a response.
+ * Item, playback, series and personalized routes: forwarded upstream, with
+ * the service account's progress replaced by the ShelfMerge user's wherever
+ * it leaks into a response.
  */
 export function itemRoutes(ctx: Context): Router {
   const r = Router()
+
+  /** Per-library auto-finish thresholds, from the upstream library settings. */
+  const finishRules = (libraryId: string | null | undefined) => {
+    const settings = (libraryId && (ctx.catalog.get(libraryId)?.settings as Record<string, unknown> | undefined)) || {}
+    return {
+      markAsFinishedTimeRemaining: typeof settings.markAsFinishedTimeRemaining === 'number' ? settings.markAsFinishedTimeRemaining : undefined,
+      markAsFinishedPercentComplete: typeof settings.markAsFinishedPercentComplete === 'number' ? settings.markAsFinishedPercentComplete : undefined
+    }
+  }
 
   // Item detail: inject our progress when the client asked for it.
   r.get('/items/:id', async (req, res) => {
@@ -66,7 +83,7 @@ export function itemRoutes(ctx: Context): Router {
 
   // Start playback: upstream creates the session under the service account;
   // we re-own it and seed the start position from our progress.
-  const play = async (req: Request, res: import('express').Response) => {
+  const play = async (req: Request, res: Response) => {
     const server = await ctx.registry.resolvePathAsync(req.path)
     const result = await server.forwardJson<SessionJSON>(req, pathWithQuery(req))
     if (result.status !== 200 || !result.json) return sendResult(res, result)
@@ -85,10 +102,12 @@ export function itemRoutes(ctx: Context): Router {
     }
 
     const mediaItemId = episodeId ?? session.bookId ?? session.libraryItem?.media?.id
+    const { libraryItem: _li, ...snapshot } = session
     const row: PlaybackSessionRow = {
       id: session.id,
       serverKey: server.key,
       userId: req.smUser.id,
+      libraryId: session.libraryId ?? '',
       libraryItemId: session.libraryItemId,
       episodeId: episodeId ?? '',
       mediaItemId: String(mediaItemId ?? ''),
@@ -97,7 +116,8 @@ export function itemRoutes(ctx: Context): Router {
       displayTitle: session.displayTitle,
       deviceDescription: session.deviceInfo?.deviceDescription ?? '',
       startedAt: session.startedAt,
-      updatedAt: session.updatedAt
+      updatedAt: session.updatedAt,
+      snapshot: JSON.stringify(snapshot)
     }
     ctx.sessions.upsert(row)
     log.info(`[play] "${req.smUser.username}" started "${session.displayTitle}" on ${server.key} (session ${session.id})`)
@@ -106,8 +126,9 @@ export function itemRoutes(ctx: Context): Router {
   r.post('/items/:id/play', play)
   r.post('/items/:id/play/:episodeId', play)
 
-  // Sync: keep the upstream session alive and record progress for our user.
+  // Sync: keep the upstream session alive, record progress and history for our user.
   const applySync = (userId: string, row: PlaybackSessionRow, body: SyncBody) => {
+    if (body.timeListened) ctx.history.addListening(row, Number(body.timeListened), body.currentTime)
     if (body.currentTime === undefined) return null
     const duration = body.duration || row.duration || 0
     const mp = ctx.progress.createUpdate(userId, row.serverKey, row.mediaItemId, {
@@ -115,14 +136,15 @@ export function itemRoutes(ctx: Context): Router {
       episodeId: row.episodeId || null,
       duration,
       currentTime: body.currentTime,
-      progress: duration ? Math.max(0, Math.min(body.currentTime / duration, 1)) : 0
+      progress: duration ? Math.max(0, Math.min(body.currentTime / duration, 1)) : 0,
+      ...finishRules(row.libraryId)
     })
     ctx.sessions.touch(row.id)
     ctx.socket.emitToUser(userId, 'user_item_progress_updated', { id: mp.id, sessionId: row.id, deviceDescription: row.deviceDescription, data: mp })
     return mp
   }
 
-  const sessionOwner = (req: Request, res: import('express').Response): PlaybackSessionRow | null => {
+  const sessionOwner = (req: Request, res: Response): PlaybackSessionRow | null => {
     const row = ctx.sessions.get(req.params.id)
     if (!row) {
       res.sendStatus(404)
@@ -138,7 +160,8 @@ export function itemRoutes(ctx: Context): Router {
   r.get('/session/:id', async (req, res) => {
     const row = sessionOwner(req, res)
     if (!row) return
-    const server = ctx.registry.server(row.serverKey)!
+    const server = ctx.registry.server(row.serverKey)
+    if (!server) return res.sendStatus(404)
     const result = await server.forwardJson<SessionJSON>(req, pathWithQuery(req))
     if (result.status === 200 && result.json) {
       result.json.userId = req.smUser.id
@@ -151,11 +174,11 @@ export function itemRoutes(ctx: Context): Router {
     const row = sessionOwner(req, res)
     if (!row) return
     const body = req.body as SyncBody
-    const server = ctx.registry.server(row.serverKey)!
-    const upstream = await server.json(`/api/session/${row.id}/sync`, { method: 'POST', body })
-    if (upstream.status === 404) {
-      // Upstream forgot the session (restart, stale cleanup); progress still counts.
-      log.warn(`[sync] upstream ${server.key} lost session ${row.id}`)
+    const server = ctx.registry.server(row.serverKey)
+    if (server) {
+      const upstream = await server.json(`/api/session/${row.id}/sync`, { method: 'POST', body }).catch(() => null)
+      // Upstream may have forgotten the session (restart, stale cleanup); progress still counts.
+      if (upstream?.status === 404) log.warn(`[sync] upstream ${server.key} lost session ${row.id}`)
     }
     applySync(req.smUser.id, row, body)
     res.sendStatus(200)
@@ -165,8 +188,8 @@ export function itemRoutes(ctx: Context): Router {
     const row = sessionOwner(req, res)
     if (!row) return
     const body = (req.body ?? {}) as SyncBody
-    const server = ctx.registry.server(row.serverKey)!
-    await server.json(`/api/session/${row.id}/close`, { method: 'POST', body: Object.keys(body).length ? body : undefined })
+    const server = ctx.registry.server(row.serverKey)
+    if (server) await server.json(`/api/session/${row.id}/close`, { method: 'POST', body: Object.keys(body).length ? body : undefined }).catch(() => null)
     if (body.currentTime !== undefined) applySync(req.smUser.id, row, body)
     ctx.sessions.remove(row.id)
     ctx.socket.emitToUser(req.smUser.id, 'user_session_closed', row.id)
@@ -174,7 +197,7 @@ export function itemRoutes(ctx: Context): Router {
   })
 
   // Offline sessions uploaded by the mobile apps.
-  interface LocalSession {
+  interface LocalSession extends SessionSnapshot {
     id: string
     libraryItemId: string
     episodeId?: string | null
@@ -188,6 +211,7 @@ export function itemRoutes(ctx: Context): Router {
   const applyLocal = async (userId: string, s: LocalSession) => {
     const resolved = await resolveMediaItemId(ctx, s.libraryItemId, s.episodeId ?? null)
     if (!resolved) return { id: s.id, success: false, error: 'Media item not found' }
+    ctx.history.upsertLocal(userId, resolved.serverKey, s, resolved.mediaItemId)
     const existing = ctx.progress.get(userId, s.libraryItemId, s.episodeId ?? null)
     // Like upstream: only apply when the local session is newer than what we have.
     if (existing && s.updatedAt && existing.lastUpdate > s.updatedAt) {
@@ -199,7 +223,8 @@ export function itemRoutes(ctx: Context): Router {
       episodeId: s.episodeId ?? null,
       duration,
       currentTime: s.currentTime,
-      progress: duration && s.currentTime !== undefined ? Math.max(0, Math.min(s.currentTime / duration, 1)) : undefined
+      progress: duration && s.currentTime !== undefined ? Math.max(0, Math.min(s.currentTime / duration, 1)) : undefined,
+      ...finishRules(s.libraryId ?? ctx.registry.lookup(s.libraryItemId)?.libraryId)
     })
     ctx.socket.emitToUser(userId, 'user_item_progress_updated', { id: mp.id, sessionId: s.id, deviceDescription: 'local', data: mp })
     return { id: s.id, success: true, progressSynced: true }
@@ -220,6 +245,67 @@ export function itemRoutes(ctx: Context): Router {
     res.json({ results })
   })
 
+  // Series detail with ?include=progress: upstream lists the series' items;
+  // which of them are finished is ours to answer.
+  const seriesWithProgress = async (req: Request, res: Response) => {
+    const server = await ctx.registry.resolvePathAsync(req.path)
+    const result = await server.forwardJson<{ progress?: { libraryItemIds: string[]; libraryItemIdsFinished: string[]; isFinished: boolean } }>(req, pathWithQuery(req))
+    if (result.status !== 200 || !result.json) return sendResult(res, result)
+    ctx.registry.learn(server.key, result.json)
+    if (result.json.progress) {
+      const ids = result.json.progress.libraryItemIds
+      const finished = ids.filter((id) => ctx.progress.get(req.smUser.id, id)?.isFinished)
+      result.json.progress = { libraryItemIds: ids, libraryItemIdsFinished: finished, isFinished: ids.length > 0 && finished.length >= ids.length }
+    }
+    sendResult(res, result, result.json)
+  }
+  r.get('/libraries/:id/series/:seriesId', seriesWithProgress)
+  r.get('/series/:id', seriesWithProgress)
+
+  /**
+   * "Continue Series": series (not hidden by the user) with at least one
+   * finished book, at least one unfinished book and nothing in progress; the
+   * entity is the first unfinished book by sequence. Mirrors
+   * libraryItemsBookFilters.getContinueSeriesLibraryItems.
+   */
+  const continueSeries = async (userId: string, libraryId: string, serverKey: string, finishedItems: LibraryItemJSON[], limit: number): Promise<unknown[]> => {
+    const server = ctx.registry.server(serverKey)
+    if (!server) return []
+    const hidden = new Set(ctx.users.seriesHidden(userId))
+    const onlyLater = !!(ctx.catalog.get(libraryId)?.settings as { onlyShowLaterBooksInContinueSeries?: boolean } | undefined)?.onlyShowLaterBooksInContinueSeries
+    const seriesIds = new Map<string, number>() // id -> most recent progress update in that series
+    for (const li of finishedItems) {
+      for (const s of ((li.media.metadata as { series?: SeriesRef[] })?.series ?? []) as SeriesRef[]) {
+        if (hidden.has(s.id)) continue
+        const mp = ctx.progress.get(userId, li.id)
+        seriesIds.set(s.id, Math.max(seriesIds.get(s.id) ?? 0, mp?.lastUpdate ?? 0))
+      }
+    }
+    const out: Array<{ entity: unknown; recent: number }> = []
+    for (const [seriesId, recent] of seriesIds) {
+      let books: LibraryItemJSON[]
+      try {
+        const r = await server.get<{ results: LibraryItemJSON[] }>(`/api/libraries/${libraryId}/items?filter=series.${b64(seriesId)}&sort=sequence&limit=0&minified=1`)
+        books = r.results ?? []
+      } catch {
+        continue
+      }
+      const seq = (li: LibraryItemJSON) => parseFloat(String((li.media.metadata as { series?: { sequence?: string } })?.series?.sequence ?? '')) || null
+      const progress = books.map((li) => ({ li, mp: ctx.progress.get(userId, li.id), seq: seq(li) }))
+      if (progress.some((p) => p.mp && !p.mp.isFinished && p.mp.currentTime > 0)) continue
+      const finished = progress.filter((p) => p.mp?.isFinished)
+      if (!finished.length) continue
+      const maxSeq = Math.max(...finished.map((p) => p.seq ?? -Infinity))
+      const next = progress.find((p) => !p.mp?.isFinished && (!onlyLater || (p.seq ?? Infinity) > maxSeq))
+      if (!next) continue
+      out.push({ entity: { ...next.li, prevBookInProgress: false }, recent })
+    }
+    return out
+      .sort((a, b) => b.recent - a.recent)
+      .slice(0, limit)
+      .map((o) => o.entity)
+  }
+
   // Home page shelves: upstream computes them for the service account, so the
   // progress-driven shelves are rebuilt from our store.
   r.get('/libraries/:id/personalized', async (req, res) => {
@@ -229,7 +315,7 @@ export function itemRoutes(ctx: Context): Router {
     ctx.registry.learn(server.key, result.json)
 
     const limit = Number(req.query.limit) || 10
-    const shelves = result.json.filter((s) => !['continue-listening', 'continue-reading', 'listen-again', 'read-again'].includes(s.id))
+    const shelves = result.json.filter((s) => !['continue-listening', 'continue-reading', 'continue-series', 'listen-again', 'read-again'].includes(s.id))
     const rows = ctx.progress.rowsForUser(req.smUser.id)
     const items = await fetchItems(ctx, [...new Set(rows.map((mp) => mp.libraryItemId))])
     const inLibrary = (id: string) => items.get(id)?.libraryId === req.params.id
@@ -237,9 +323,12 @@ export function itemRoutes(ctx: Context): Router {
     const continueListening: unknown[] = []
     const continueReading: unknown[] = []
     const listenAgain: unknown[] = []
+    const finishedItems: LibraryItemJSON[] = []
     for (const mp of rows) {
-      if (!inLibrary(mp.libraryItemId) || mp.hideFromContinueListening) continue
+      if (!inLibrary(mp.libraryItemId)) continue
       const li = items.get(mp.libraryItemId)!
+      if (mp.isFinished && !mp.episodeId) finishedItems.push(li)
+      if (mp.hideFromContinueListening) continue
       const entity = { ...li, progressLastUpdate: mp.updatedAt, userMediaProgress: ctx.progress.getById(req.smUser.id, mp.id) }
       if (mp.episodeId) {
         const ep = (li.media.podcastEpisodes as Array<Record<string, unknown>> | undefined)?.find((e) => e.id === mp.episodeId)
@@ -252,11 +341,15 @@ export function itemRoutes(ctx: Context): Router {
       else if (mp.ebookProgress > 0) continueReading.push(entity)
     }
 
-    const mediaType = (items.values().next().value as LibraryItemJSON | undefined)?.mediaType ?? 'book'
+    const mediaType = ctx.catalog.get(req.params.id)?.mediaType ?? 'book'
     const type = mediaType === 'podcast' ? 'episode' : 'book'
     const out: Shelf[] = []
     if (continueListening.length) out.push({ id: 'continue-listening', label: 'Continue Listening', labelStringKey: 'LabelContinueListening', type, entities: continueListening.slice(0, limit), total: continueListening.length })
     if (continueReading.length) out.push({ id: 'continue-reading', label: 'Continue Reading', labelStringKey: 'LabelContinueReading', type: 'book', entities: continueReading.slice(0, limit), total: continueReading.length })
+    if (mediaType === 'book' && finishedItems.length) {
+      const cs = await continueSeries(req.smUser.id, req.params.id, server.key, finishedItems, limit)
+      if (cs.length) out.push({ id: 'continue-series', label: 'Continue Series', labelStringKey: 'LabelContinueSeries', type: 'book', entities: cs, total: cs.length })
+    }
     out.push(...shelves)
     if (listenAgain.length) out.push({ id: 'listen-again', label: 'Listen Again', labelStringKey: 'LabelListenAgain', type, entities: listenAgain.slice(0, limit), total: listenAgain.length })
     sendResult(res, result, out)

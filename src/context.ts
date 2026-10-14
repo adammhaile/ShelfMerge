@@ -7,6 +7,8 @@ import type { ProgressStore } from './progress.js'
 import type { PlaybackSessions } from './sessions.js'
 import type { SocketHub } from './socket/hub.js'
 import type { Catalog } from './upstream/catalog.js'
+import type { ListeningHistory } from './history.js'
+import type { CollectionStore } from './collections.js'
 import type { UserRow } from './db.js'
 
 /** Everything a route handler needs, built once in index.ts. */
@@ -20,6 +22,8 @@ export interface Context {
   sessions: PlaybackSessions
   socket: SocketHub
   catalog: Catalog
+  history: ListeningHistory
+  collections: CollectionStore
   /** Audiobookshelf version of the bundled web client; reported in /status. */
   absVersion: string
 }

@@ -8,12 +8,13 @@
 # they would with real books):
 #   Books/Jane Doe/Short Stories/Short Stories.m4b        30 min m4b with 3 chapters
 #   Books/Jane Doe/Long Walk/Long Walk - 01.mp3 .. 03     3 x 10 min multi-file mp3 book
-#   Books/John Roe/The Sequel (Series Name #2)/book.m4b   20 min, series + sequence in folder name
+#   Books/John Roe/Series Name/Book 2 - The Sequel/book.m4b   20 min, Author/Series/Book N - Title layout
 #   Books/John Roe/Long Walk/Long Walk.mp3                15 min, same title as Jane Doe's for duplicate tests
 # Second server (Books-B):
 #   Books-B/Jane Doe/Short Stories/Short Stories.m4b      same book as on A, different narrator
 #   Books-B/Mary Major/Other Book/Other Book.mp3          12 min
-#   Books-B/Mary Major/Another One (Series Two #1)/book.m4b  25 min
+#   Books-B/Mary Major/Series Two/Book 1 - Another One/book.m4b  25 min
+#   Books-B/Mary Major/Series Two/Book 2 - Another Two/book.m4b  10 min
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -75,7 +76,7 @@ for i in 1 2 3; do
 done
 
 # 3. Series book
-d=/out/Books/"John Roe"/"The Sequel (Series Name #2)"; mkdir -p "$d"
+d=/out/Books/"John Roe"/"Series Name"/"Book 2 - The Sequel"; mkdir -p "$d"
 cover "$d" 55aa33
 tone 1200 500 "$d/book.m4b" -c:a aac -b:a 32k \
   -metadata title="The Sequel" -metadata artist="John Roe" -metadata album="The Sequel" \
@@ -100,7 +101,12 @@ cover "$d" aaaa33
 tone 720 700 "$d/Other Book.mp3" -c:a libmp3lame -b:a 32k \
   -metadata title="Other Book" -metadata artist="Mary Major" -metadata album="Other Book" -metadata composer="Narrator Two" -metadata date=2018
 
-d=/out/Books-B/"Mary Major"/"Another One (Series Two #1)"; mkdir -p "$d"
+d=/out/Books-B/"Mary Major"/"Series Two"/"Book 2 - Another Two"; mkdir -p "$d"
+cover "$d" 226699
+tone 600 850 "$d/book.m4b" -c:a aac -b:a 32k \
+  -metadata title="Another Two" -metadata artist="Mary Major" -metadata album="Another Two" -metadata date=2023
+
+d=/out/Books-B/"Mary Major"/"Series Two"/"Book 1 - Another One"; mkdir -p "$d"
 cover "$d" 777777
 tone 1500 800 "$d/book.m4b" -c:a aac -b:a 32k \
   -metadata title="Another One" -metadata artist="Mary Major" -metadata album="Another One" -metadata date=2022

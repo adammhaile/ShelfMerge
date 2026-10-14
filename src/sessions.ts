@@ -20,8 +20,8 @@ export class PlaybackSessions {
   upsert(row: PlaybackSessionRow) {
     this.db
       .prepare(
-        `INSERT INTO playback_sessions (id, serverKey, userId, libraryItemId, episodeId, mediaItemId, mediaType, duration, displayTitle, deviceDescription, startedAt, updatedAt)
-         VALUES (@id, @serverKey, @userId, @libraryItemId, @episodeId, @mediaItemId, @mediaType, @duration, @displayTitle, @deviceDescription, @startedAt, @updatedAt)
+        `INSERT INTO playback_sessions (id, serverKey, userId, libraryId, libraryItemId, episodeId, mediaItemId, mediaType, duration, displayTitle, deviceDescription, startedAt, updatedAt, snapshot)
+         VALUES (@id, @serverKey, @userId, @libraryId, @libraryItemId, @episodeId, @mediaItemId, @mediaType, @duration, @displayTitle, @deviceDescription, @startedAt, @updatedAt, @snapshot)
          ON CONFLICT(id) DO UPDATE SET updatedAt = excluded.updatedAt`
       )
       .run(row)

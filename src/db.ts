@@ -59,12 +59,14 @@ export interface IdMapRow {
   serverKey: string
   kind: string | null
   mediaId: string | null
+  libraryId: string | null
 }
 
 export interface PlaybackSessionRow {
   id: string
   serverKey: string
   userId: string
+  libraryId: string
   libraryItemId: string
   episodeId: string
   mediaItemId: string
@@ -73,6 +75,55 @@ export interface PlaybackSessionRow {
   displayTitle: string
   deviceDescription: string
   startedAt: number
+  updatedAt: number
+  /** The upstream session JSON (minus libraryItem), used to seed the history row. */
+  snapshot: string
+}
+
+/** A finished or in-progress listening session, Audiobookshelf's playback session history. */
+export interface ListeningSessionRow {
+  id: string
+  userId: string
+  serverKey: string
+  libraryId: string | null
+  libraryItemId: string
+  episodeId: string
+  mediaItemId: string
+  mediaType: string
+  mediaMetadata: string
+  displayTitle: string
+  displayAuthor: string
+  coverPath: string | null
+  duration: number
+  playMethod: number | null
+  mediaPlayer: string | null
+  deviceInfo: string | null
+  serverVersion: string | null
+  date: string
+  dayOfWeek: string
+  timeListening: number
+  startTime: number
+  currentTime: number
+  startedAt: number
+  updatedAt: number
+}
+
+export interface CollectionRow {
+  id: string
+  libraryId: string
+  name: string
+  description: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PlaylistRow {
+  id: string
+  userId: string
+  libraryId: string
+  name: string
+  description: string | null
+  createdAt: number
   updatedAt: number
 }
 
@@ -150,11 +201,75 @@ CREATE TABLE IF NOT EXISTS playback_sessions (
   startedAt INTEGER NOT NULL,
   updatedAt INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS listening_sessions (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  serverKey TEXT NOT NULL,
+  libraryId TEXT,
+  libraryItemId TEXT NOT NULL,
+  episodeId TEXT NOT NULL DEFAULT '',
+  mediaItemId TEXT NOT NULL,
+  mediaType TEXT NOT NULL,
+  mediaMetadata TEXT NOT NULL DEFAULT '{}',
+  displayTitle TEXT NOT NULL DEFAULT '',
+  displayAuthor TEXT NOT NULL DEFAULT '',
+  coverPath TEXT,
+  duration REAL NOT NULL DEFAULT 0,
+  playMethod INTEGER,
+  mediaPlayer TEXT,
+  deviceInfo TEXT,
+  serverVersion TEXT,
+  date TEXT NOT NULL,
+  dayOfWeek TEXT NOT NULL,
+  timeListening REAL NOT NULL DEFAULT 0,
+  startTime REAL NOT NULL DEFAULT 0,
+  currentTime REAL NOT NULL DEFAULT 0,
+  startedAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS listening_sessions_user ON listening_sessions(userId, updatedAt);
+CREATE TABLE IF NOT EXISTS collections (
+  id TEXT PRIMARY KEY,
+  libraryId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS collection_books (
+  collectionId TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  libraryItemId TEXT NOT NULL,
+  "order" INTEGER NOT NULL,
+  PRIMARY KEY (collectionId, libraryItemId)
+);
+CREATE TABLE IF NOT EXISTS playlists (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  libraryId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS playlist_items (
+  playlistId TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+  libraryItemId TEXT NOT NULL,
+  episodeId TEXT NOT NULL DEFAULT '',
+  "order" INTEGER NOT NULL,
+  PRIMARY KEY (playlistId, libraryItemId, episodeId)
+);
 CREATE TABLE IF NOT EXISTS kv (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
 `
+
+/** Columns added after the first release; applied to existing databases. */
+const migrations: Array<{ table: string; column: string; ddl: string }> = [
+  { table: 'id_map', column: 'libraryId', ddl: 'TEXT' },
+  { table: 'playback_sessions', column: 'libraryId', ddl: "TEXT NOT NULL DEFAULT ''" },
+  { table: 'playback_sessions', column: 'snapshot', ddl: "TEXT NOT NULL DEFAULT '{}'" }
+]
 
 export function openDb(dataDir: string): Db {
   fs.mkdirSync(dataDir, { recursive: true })
@@ -162,6 +277,10 @@ export function openDb(dataDir: string): Db {
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   db.exec(schema)
+  for (const m of migrations) {
+    const cols = db.pragma(`table_info(${m.table})`) as Array<{ name: string }>
+    if (!cols.some((c) => c.name === m.column)) db.exec(`ALTER TABLE ${m.table} ADD COLUMN ${m.column} ${m.ddl}`)
+  }
   return db
 }
 
