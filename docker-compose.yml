@@ -1,0 +1,16 @@
+# Production-style run: ShelfMerge only. Point it at your real Audiobookshelf
+# servers in config/shelfmerge.yaml (see config/shelfmerge.example.yaml).
+services:
+  shelfmerge:
+    build: .
+    image: shelfmerge:local
+    container_name: shelfmerge
+    ports:
+      - "3333:3333"
+    volumes:
+      - ./config:/config
+      - shelfmerge-data:/data
+    restart: unless-stopped
+
+volumes:
+  shelfmerge-data:

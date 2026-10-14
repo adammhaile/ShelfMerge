@@ -1,0 +1,23 @@
+# ShelfMerge configuration. Copy to shelfmerge.yaml and edit.
+
+port: 3333
+
+# Where ShelfMerge keeps its SQLite database (users, progress, bookmarks,
+# id map). Relative paths are resolved from the project root; in Docker use
+# the /data volume.
+dataDir: /data
+
+# Upstream Audiobookshelf servers. Each needs an API key for a dedicated
+# service user on that server (Settings → API Keys, Audiobookshelf 2.26+).
+# The service user's library permissions decide what ShelfMerge can see.
+servers:
+  home:
+    url: https://abs.example.com
+    apiKey: eyJhbGciOi...
+    label: Home
+
+# People who log into ShelfMerge. Progress and bookmarks are kept per
+# ShelfMerge user; upstream only ever sees the service account.
+users:
+  adam:
+    password: change-me
