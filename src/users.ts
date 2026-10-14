@@ -29,13 +29,15 @@ export interface OldUserJSON {
 }
 
 /**
- * Permissions a ShelfMerge user reports to clients. `update` is on so the
- * "add to collection" UI appears; the forwarder refuses every other write
- * before it reaches an upstream server.
+ * Permissions a ShelfMerge user reports to clients. `update` stays off so the
+ * stock UI hides editing controls; it also hides "add to collection" (the
+ * client gates both on the same flag), which we accept since playlists cover
+ * the per-user case. The collection routes remain available to the API. The
+ * forwarder refuses every upstream write regardless of this flag.
  */
 export const USER_PERMISSIONS = {
   download: true,
-  update: true,
+  update: false,
   delete: false,
   upload: false,
   createEreader: false,

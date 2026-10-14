@@ -24,8 +24,7 @@ const STUBS: Record<string, unknown> = {
 /**
  * The only writes that may reach an upstream server. Everything else that
  * mutates (metadata edits, uploads, scans, deletes, settings) is refused here
- * so the service account's permissions never matter: ShelfMerge users have
- * `update` so the collection UI appears, but their edits stop at the proxy.
+ * so the service account's permissions never matter.
  */
 const ALLOWED_WRITES = [/^\/items\/[^/]+\/play(\/|$)/, /^\/items\/batch\/get$/, /^\/session\//, /^\/authorize$/, /^\/podcasts\/feed$/, /^\/podcasts\/opml\/parse$/]
 

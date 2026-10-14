@@ -10,7 +10,7 @@ A federating proxy for [Audiobookshelf](https://www.audiobookshelf.org/). Point 
 - Upstream item, series, author and session ids are passed through unchanged. ShelfMerge keeps an `id → server` map (SQLite) to route each request, learned from every response that passes through. An id it has never seen (a phone asking for a downloaded book after the map was lost) is probed on each server.
 - `/api/libraries` is served from a cached union of all servers' libraries, so browsing keeps working when one server is down. Library names are prefixed with the server label (`prefixLibraryNames`).
 - Listening progress, history and stats, bookmarks, collections, playlists and the progress-driven home shelves ("continue listening", "continue series", "listen again") are owned by ShelfMerge, because every ShelfMerge user shares one upstream service account per server. Playback sessions are still created upstream (so transcoding works and the owner sees listening stats for the service user), and ShelfMerge mirrors each sync into its own store. Auto mark-as-finished follows each upstream library's settings.
-- Upstream is read-only through ShelfMerge: apart from playback, every mutating request (metadata edits, uploads, scans, deletes, settings) is refused by the proxy with 403 before it reaches a server, whatever the service account is allowed to do. ShelfMerge users report the `update` permission so the collection UI appears; collections live in ShelfMerge and may span servers.
+- Upstream is read-only through ShelfMerge: apart from playback, every mutating request (metadata edits, uploads, scans, deletes, settings) is refused by the proxy with 403 before it reaches a server, whatever the service account is allowed to do. ShelfMerge users have no `update` permission, so the stock UI hides editing controls (and with them "add to collection"; playlists are the per-user tool, collections remain available via the API).
 - Audio, covers and ebooks are relayed with `Range` support. All media bytes pass through ShelfMerge.
 - One socket.io connection per upstream server relays catalog events (items added, updated, removed, …) to connected clients; user events are generated locally.
 - The web client is the stock build, copied out of the official Audiobookshelf image when the Docker image is built.
@@ -63,8 +63,8 @@ nginx needs the usual WebSocket upgrade headers on `/socket.io/` and `/audiobook
 ## Limitations
 
 - Each library is still one upstream library; there is no merged view across servers yet, and the same book on two servers shows up twice.
-- Metadata edits, uploads, scans and other admin actions are refused by the proxy; the stock UI still shows some of those buttons (they fail with a 403 toast).
-- Collections are shared between ShelfMerge users, as they are in Audiobookshelf; playlists are per user.
+- Metadata edits, uploads, scans and other admin actions are hidden in the UI and refused by the proxy.
+- Collections have no UI (the client ties it to the edit permission); playlists are per user and fully supported.
 - Only local username and password login; no OpenID.
 
 ## License
