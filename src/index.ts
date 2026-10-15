@@ -1,7 +1,7 @@
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
-import { loadConfig } from './config.js'
+import { loadConfig, parseConfig, fetchConfigText, isConfigUrl, type Config } from './config.js'
 import { openDb } from './db.js'
 import { UpstreamServer } from './upstream/server.js'
 import { Registry } from './upstream/registry.js'
@@ -24,13 +24,24 @@ import { log } from './logger.js'
 
 /** Version of the Audiobookshelf web client bundled with the image. */
 const ABS_VERSION = process.env.ABS_VERSION ?? '2.37.1'
-const CONFIG_FILE = process.env.SHELFMERGE_CONFIG ?? 'config/shelfmerge.yaml'
+const CONFIG_SOURCE = process.env.SHELFMERGE_CONFIG ?? 'config/shelfmerge.yaml'
+/** Seconds between checks of a URL config (file configs are polled every 2 s). */
+const CONFIG_POLL_S = Number(process.env.SHELFMERGE_CONFIG_POLL) > 0 ? Number(process.env.SHELFMERGE_CONFIG_POLL) : 60
+let lastConfigText = ''
+
+async function readConfig(): Promise<Config> {
+  if (isConfigUrl(CONFIG_SOURCE)) {
+    lastConfigText = await fetchConfigText(CONFIG_SOURCE)
+    return parseConfig(lastConfigText)
+  }
+  return loadConfig(CONFIG_SOURCE)
+}
 
 /** Events whose payload is a library item (or a list of them) with a libraryId. */
 const ITEM_EVENTS = /^(item_added|item_updated|item_removed|items_added|items_updated)$/
 
 async function main() {
-  const cfg = loadConfig(CONFIG_FILE)
+  const cfg = await readConfig()
   const db = openDb(cfg.dataDir)
   const servers = cfg.servers.map((s) => new UpstreamServer(s))
   const registry = new Registry(db, servers)
@@ -121,16 +132,7 @@ async function main() {
  * data paths need one.
  */
 function watchConfig(ctx: Context) {
-  const file = path.resolve(CONFIG_FILE)
-  let timer: NodeJS.Timeout | null = null
-  const reload = () => {
-    let next
-    try {
-      next = loadConfig(file)
-    } catch (err) {
-      log.error(`[config] reload failed, keeping current config:`, (err as Error).message)
-      return
-    }
+  const apply = (next: Config) => {
     ctx.cfg.users = next.users
     ctx.cfg.prefixLibraryNames = next.prefixLibraryNames
     ctx.cfg.merged = next.merged
@@ -147,6 +149,36 @@ function watchConfig(ctx: Context) {
       .then(() => ctx.indexQuery.invalidate())
       .catch(() => {})
     log.info(`[config] reloaded: ${next.servers.length} servers, ${next.users.length} users, ${next.merged.length} merged libraries`)
+  }
+  const failed = (err: unknown) => log.error(`[config] reload failed, keeping current config:`, (err as Error).message)
+
+  if (isConfigUrl(CONFIG_SOURCE)) {
+    // Shared config served over HTTP (several instances in different regions): re-fetch on a timer, apply when the text changed.
+    const poll = async () => {
+      try {
+        const text = await fetchConfigText(CONFIG_SOURCE)
+        if (text === lastConfigText) return
+        const next = parseConfig(text)
+        lastConfigText = text
+        apply(next)
+      } catch (err) {
+        failed(err)
+      }
+    }
+    const t = setInterval(() => poll().catch(() => {}), CONFIG_POLL_S * 1000)
+    t.unref()
+    log.info(`[config] polling ${CONFIG_SOURCE} every ${CONFIG_POLL_S}s`)
+    return
+  }
+
+  const file = path.resolve(CONFIG_SOURCE)
+  let timer: NodeJS.Timeout | null = null
+  const reload = () => {
+    try {
+      apply(loadConfig(file))
+    } catch (err) {
+      failed(err)
+    }
   }
   // Polling rather than inotify: it also works on bind mounts and network
   // filesystems (Docker volumes, WSL drvfs) where change events never arrive.

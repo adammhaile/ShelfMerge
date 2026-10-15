@@ -5,11 +5,13 @@
  * Restart ShelfMerge afterwards; the running process keeps the old secret in memory.
  */
 import crypto from 'node:crypto'
-import { loadConfig } from '../config.js'
+import { loadConfig, isConfigUrl } from '../config.js'
 import { openDb, kvSet } from '../db.js'
 
-const cfg = loadConfig(process.env.SHELFMERGE_CONFIG ?? 'config/shelfmerge.yaml')
-const db = openDb(cfg.dataDir)
+const source = process.env.SHELFMERGE_CONFIG ?? 'config/shelfmerge.yaml'
+const dataDir = process.env.SHELFMERGE_DATA_DIR ?? (isConfigUrl(source) ? null : loadConfig(source).dataDir)
+if (!dataDir) throw new Error('config comes from a URL; set SHELFMERGE_DATA_DIR to the data directory')
+const db = openDb(dataDir)
 kvSet(db, 'tokenSecret', crypto.randomBytes(32).toString('base64'))
 const sessions = db.prepare('DELETE FROM auth_sessions').run().changes
 db.close()

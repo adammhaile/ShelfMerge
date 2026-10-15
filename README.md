@@ -66,7 +66,13 @@ See [config/shelfmerge.example.yaml](config/shelfmerge.example.yaml).
 
 Login and token refresh are rate limited per IP: 20 failed attempts per 10 minutes, then `429` (`SHELFMERGE_AUTH_RATE_LIMIT` sets the count, `0` disables; `SHELFMERGE_AUTH_RATE_LIMIT_WINDOW` the window in ms). Successful requests never count.
 
-To sign everyone out and replace the JWT signing secret: `npm run rotate-secret` (dev) or `docker exec shelfmerge node dist/tools/rotate-secret.js`, then restart. The file is re-read when it changes (polled every 2 s): users and servers can be added, removed or re-keyed live; `port` and `dataDir` need a restart. A user removed from the config keeps their progress but can no longer log in. Environment overrides: `PORT`, `SHELFMERGE_CONFIG`, `SHELFMERGE_CLIENT_DIR`, `SHELFMERGE_TOKEN_SECRET`, `ROUTER_BASE_PATH`, `LOG_LEVEL` (`debug`, `info`, `warn`, `error`).
+To sign everyone out and replace the JWT signing secret: `npm run rotate-secret` (dev) or `docker exec shelfmerge node dist/tools/rotate-secret.js`, then restart. The file is re-read when it changes (polled every 2 s): users and servers can be added, removed or re-keyed live; `port` and `dataDir` need a restart. A user removed from the config keeps their progress but can no longer log in. Environment overrides: `PORT`, `SHELFMERGE_CONFIG` (file path or URL), `SHELFMERGE_CONFIG_AUTH`, `SHELFMERGE_CONFIG_POLL`, `SHELFMERGE_DATA_DIR`, `SHELFMERGE_CLIENT_DIR`, `SHELFMERGE_TOKEN_SECRET`, `ROUTER_BASE_PATH`, `LOG_LEVEL` (`debug`, `info`, `warn`, `error`).
+
+## Several instances, one config
+
+Clients should be near their ShelfMerge, since every click and every audio byte goes through it; with friends on another continent, run a second instance there (any small VPS). Instances share nothing but the upstream servers, so each keeps its own users, progress and index, and a person just uses the nearest one.
+
+To keep one config for all of them, serve the YAML over HTTP and point every instance at it: `SHELFMERGE_CONFIG=https://raw.githubusercontent.com/<you>/<private-repo>/main/shelfmerge.yaml` with `SHELFMERGE_CONFIG_AUTH="token ghp_..."` (a fine-grained token with read access to that repo; any URL that accepts an `Authorization` header works). The file is re-fetched every `SHELFMERGE_CONFIG_POLL` seconds (default 60) and applied when it changed. Keep secrets out of the shared file by writing `${HOME_API_KEY}` and so on, and give each instance the values in its own `.env`; with a URL config, set `dataDir` to an absolute path or `SHELFMERGE_DATA_DIR`.
 
 ## Upgrading Audiobookshelf
 

@@ -10,7 +10,7 @@
  */
 import readline from 'node:readline'
 import bcrypt from 'bcryptjs'
-import { loadConfig } from '../config.js'
+import { loadConfig, isConfigUrl } from '../config.js'
 import { openDb } from '../db.js'
 import type { UserRow } from '../db.js'
 
@@ -50,14 +50,19 @@ async function main() {
     console.log(bcrypt.hashSync(pw, 10))
     return
   }
-  const cfg = loadConfig(process.env.SHELFMERGE_CONFIG ?? 'config/shelfmerge.yaml')
-  const db = openDb(cfg.dataDir)
+  const source = process.env.SHELFMERGE_CONFIG ?? 'config/shelfmerge.yaml'
+  const fileCfg = isConfigUrl(source) ? null : loadConfig(source)
+  const dataDir = process.env.SHELFMERGE_DATA_DIR ?? fileCfg?.dataDir
+  if (!dataDir) throw new Error('config comes from a URL; set SHELFMERGE_DATA_DIR to the data directory')
+  const configUsers = fileCfg?.users.map((u) => u.username) ?? null
+  const db = openDb(dataDir)
   try {
     if (cmd === 'list') {
-      const rows = db.prepare('SELECT username, passwordHash, createdAt, lastSeen FROM users ORDER BY username').all() as UserRow[]
+      const rows = db.prepare('SELECT username, passwordHash, createdAt, lastSeen, isActive, source FROM users ORDER BY username').all() as UserRow[]
       for (const r of rows) {
-        const inConfig = cfg.users.some((u) => u.username === r.username)
-        console.log(`${r.username.padEnd(20)} ${r.passwordHash ? 'password set' : 'NO PASSWORD '}  ${inConfig ? '' : '(not in config: cannot log in)'}  last seen ${r.lastSeen ? new Date(r.lastSeen).toISOString() : 'never'}`)
+        const allowed = r.source === 'admin' || !configUsers || configUsers.includes(r.username)
+        const note = !r.isActive ? '(deactivated)' : allowed ? '' : '(not in config: cannot log in)'
+        console.log(`${r.username.padEnd(20)} ${r.passwordHash ? 'password set' : 'NO PASSWORD '}  ${r.source.padEnd(6)} ${note.padEnd(32)} last seen ${r.lastSeen ? new Date(r.lastSeen).toISOString() : 'never'}`)
       }
       return
     }

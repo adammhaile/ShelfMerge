@@ -94,10 +94,35 @@ export function substituteEnv(text: string, env: NodeJS.ProcessEnv = process.env
   })
 }
 
+export const isConfigUrl = (source: string) => /^https?:\/\//i.test(source)
+
+/** Read the config from a local file. */
 export function loadConfig(file = process.env.SHELFMERGE_CONFIG ?? 'config/shelfmerge.yaml'): Config {
+  if (isConfigUrl(file)) throw new Error(`Config: ${file} is a URL; use fetchConfigText() and parseConfig()`)
   const abs = path.resolve(file)
-  const raw = YAML.parse(substituteEnv(fs.readFileSync(abs, 'utf8'))) as RawConfig
-  const baseDir = path.dirname(abs)
+  return parseConfig(fs.readFileSync(abs, 'utf8'), path.dirname(abs))
+}
+
+/**
+ * Fetch the config text from a URL (several instances sharing one file).
+ * SHELFMERGE_CONFIG_AUTH, when set, is sent as the Authorization header,
+ * e.g. `token ghp_...` for a private GitHub raw URL.
+ */
+export async function fetchConfigText(url: string): Promise<string> {
+  const headers: Record<string, string> = { accept: 'text/plain, application/x-yaml, */*' }
+  if (process.env.SHELFMERGE_CONFIG_AUTH) headers.authorization = process.env.SHELFMERGE_CONFIG_AUTH
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) })
+  if (!res.ok) throw new Error(`Config: ${url} responded ${res.status}`)
+  return res.text()
+}
+
+/**
+ * Parse config text. Relative `dataDir`/`clientDir` resolve against the
+ * parent of `baseDir` (the project root for config/shelfmerge.yaml); a URL
+ * config should use absolute paths or SHELFMERGE_DATA_DIR.
+ */
+export function parseConfig(text: string, baseDir: string = path.join(process.cwd(), 'config')): Config {
+  const raw = (YAML.parse(substituteEnv(text)) ?? {}) as RawConfig
 
   const servers = Object.entries(raw.servers ?? {}).map(([key, s]) => {
     if (!s?.url || !s?.apiKey) throw new Error(`Config: server "${key}" needs url and apiKey`)
@@ -151,7 +176,7 @@ export function loadConfig(file = process.env.SHELFMERGE_CONFIG ?? 'config/shelf
 
   return {
     port: Number(process.env.PORT ?? raw.port ?? 3333),
-    dataDir: resolveDir(raw.dataDir, 'data'),
+    dataDir: process.env.SHELFMERGE_DATA_DIR ?? resolveDir(raw.dataDir, 'data'),
     clientDir: process.env.SHELFMERGE_CLIENT_DIR ?? resolveDir(raw.clientDir, 'client-dist'),
     servers,
     users,
