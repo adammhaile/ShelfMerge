@@ -20,13 +20,16 @@ A federating proxy for [Audiobookshelf](https://www.audiobookshelf.org/). Point 
 
 ## Run with Docker
 
+The simple setup is one instance, ideally on the machine that already runs your own Audiobookshelf:
+
 ```bash
-cp config/shelfmerge.example.yaml config/shelfmerge.yaml   # edit servers and users
-cp .env.example .env                                         # the API keys and passwords the YAML references as ${VAR}
+cp config/shelfmerge.example.yaml config/shelfmerge.yaml   # servers, one admin user; API keys can go straight in here
 docker compose up -d --build
 ```
 
-Open <http://localhost:3333> and log in with a user from the config. In the mobile apps, add `http://<host>:3333` as a server.
+Open <http://localhost:3333>, log in as the admin user, change the password on the account page, and add everyone else under Settings → Users. No other commands are needed after that: users, passwords and deactivation are all in the web UI, and config edits are picked up live. In the mobile apps, add `http://<host>:3333` (or the HTTPS address below) as a server.
+
+`.env` is optional: if you prefer keeping keys out of the YAML, reference them as `${VAR}` and put the values there (`.env.example`).
 
 For HTTPS on the open internet, set `SHELFMERGE_DOMAIN` in `.env` and run `docker compose --profile caddy up -d`; Caddy terminates TLS with an automatic certificate and proxies to ShelfMerge. If you already run a reverse proxy, skip the profile and point it at port 3333 (see below).
 
