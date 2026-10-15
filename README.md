@@ -43,7 +43,7 @@ npm install
 npm run dev                   # ShelfMerge on :3333; users adam/adam (everything) and guest/guest (one library)
 ```
 
-Unit tests (`npm test`, vitest) cover the edition matcher, title and name normalization, the index query layer (sorting, filters, collapsed series, search, cross-server series and author grouping, edition hiding), the progress rules, token rotation and the rate limiter. CI runs them, then the smoke suites below against two real Audiobookshelf containers, and publishes the image to GHCR on pushes to `main` and on `v*` tags.
+Unit tests (`npm test`, vitest) cover the edition matcher, title and name normalization, the index query layer (sorting, filters, collapsed series, search, cross-server series and author grouping, edition hiding), the progress rules, token rotation and the rate limiter. CI runs them, then the smoke suites below against two real Audiobookshelf containers, on every push and pull request. The image is published to `ghcr.io/adammhaile/shelfmerge` only when a GitHub release is published, tagged with the release tag (`v1.2.0` gives `1.2.0`, `1.2`, `1`) and `latest`.
 
 Smoke tests against the running dev stack (start the proxy with `SHELFMERGE_AUTH_RATE_LIMIT_WINDOW=15000` when running them all, since the accounts suite deliberately trips the limiter):
 
