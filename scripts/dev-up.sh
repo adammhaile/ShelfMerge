@@ -11,13 +11,15 @@ cd "$ROOT"
 [ -d test/fixtures/generated/Books-B ] || ./test/fixtures/generate.sh >/dev/null
 docker compose -f docker-compose.dev.yml up -d
 
-KEY_A="$(./scripts/seed-abs.sh http://localhost:13378 Books 4 | sed -n 's/^API_KEY=//p')"
-KEY_B="$(./scripts/seed-abs.sh http://localhost:13379 Shelf 3 | sed -n 's/^API_KEY=//p')"
+SEED_A="$(./scripts/seed-abs.sh http://localhost:13378 Books 4)"
+KEY_A="$(echo "$SEED_A" | sed -n 's/^API_KEY=//p')"
+ADAM_A="$(echo "$SEED_A" | sed -n 's/^ADAM_KEY=//p')"
+KEY_B="$(./scripts/seed-abs.sh http://localhost:13379 Shelf 4 | sed -n 's/^API_KEY=//p')"
 
 CFG="$ROOT/config/shelfmerge.yaml"
 if [ -f "$CFG" ] && [ "${1:-}" = "--keep-config" ]; then
   echo "Keeping existing $CFG"
-  echo "  a: $KEY_A"
+  echo "  a: $KEY_A  (adam's own key: $ADAM_A)"
   echo "  b: $KEY_B"
   exit 0
 fi
@@ -38,6 +40,9 @@ servers:
 users:
   adam:
     password: adam
+    # adam's own account on server A: requests there run as adam, progress flows both ways
+    accounts:
+      a: $ADAM_A
   guest:
     password: guest
     libraries: [a:Books]

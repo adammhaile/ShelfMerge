@@ -81,11 +81,10 @@ export function meRoutes(ctx: Context): Router {
   r.get('/me/progress/:id/remove-from-continue-listening', (req, res) => {
     const mp = ctx.progress.getById(req.smUser.id, req.params.id)
     if (!mp) return res.sendStatus(404)
-    ctx.progress.createUpdate(req.smUser.id, ctx.registry.lookup(mp.libraryItemId)?.serverKey ?? ctx.registry.default.key, mp.mediaItemId, {
-      libraryItemId: mp.libraryItemId,
-      episodeId: mp.episodeId,
-      hideFromContinueListening: true
-    })
+    const serverKey = ctx.registry.lookup(mp.libraryItemId)?.serverKey ?? ctx.registry.default.key
+    const payload = { libraryItemId: mp.libraryItemId, episodeId: mp.episodeId, hideFromContinueListening: true }
+    ctx.progress.createUpdate(req.smUser.id, serverKey, mp.mediaItemId, payload)
+    ctx.accounts.writeThrough(req.smUser, serverKey, payload).catch(() => {})
     emitUserUpdated(req.smUser.id)
     res.json(ctx.users.toOldJSON(req.smUser))
   })
@@ -107,7 +106,9 @@ export function meRoutes(ctx: Context): Router {
         log.warn(`[me] batch progress: item ${p.libraryItemId} not found`)
         continue
       }
-      ctx.progress.createUpdate(req.smUser.id, resolved.serverKey, resolved.mediaItemId, { ...p, libraryItemId: p.libraryItemId, episodeId: (p.episodeId as string | null) ?? null } as never)
+      const payload = { ...p, libraryItemId: p.libraryItemId, episodeId: (p.episodeId as string | null) ?? null } as never
+      ctx.progress.createUpdate(req.smUser.id, resolved.serverKey, resolved.mediaItemId, payload)
+      ctx.accounts.writeThrough(req.smUser, resolved.serverKey, payload).catch(() => {})
       updated = true
     }
     if (updated) emitUserUpdated(req.smUser.id)
@@ -118,13 +119,15 @@ export function meRoutes(ctx: Context): Router {
     const resolved = await resolveMediaItemId(ctx, req.params.libraryItemId, req.params.episodeId ?? null)
     if (!resolved) return res.status(404).send('Library item not found')
     const settings = (ctx.catalog.get(ctx.registry.lookup(req.params.libraryItemId)?.libraryId ?? '')?.settings ?? {}) as Record<string, unknown>
-    ctx.progress.createUpdate(req.smUser.id, resolved.serverKey, resolved.mediaItemId, {
+    const payload = {
       ...(req.body as object),
       libraryItemId: req.params.libraryItemId,
       episodeId: req.params.episodeId ?? null,
       markAsFinishedTimeRemaining: typeof settings.markAsFinishedTimeRemaining === 'number' ? settings.markAsFinishedTimeRemaining : undefined,
       markAsFinishedPercentComplete: typeof settings.markAsFinishedPercentComplete === 'number' ? settings.markAsFinishedPercentComplete : undefined
-    })
+    }
+    ctx.progress.createUpdate(req.smUser.id, resolved.serverKey, resolved.mediaItemId, payload)
+    ctx.accounts.writeThrough(req.smUser, resolved.serverKey, payload).catch(() => {})
     emitUserUpdated(req.smUser.id)
     res.sendStatus(200)
   })

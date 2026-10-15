@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express'
 import type { Context } from '../context.js'
 import { authMiddleware } from './middleware.js'
+import { authRateLimit } from './ratelimit.js'
 import { log } from '../logger.js'
 
 /**
@@ -43,14 +44,20 @@ export function authRoutes(ctx: Context): Router {
   r.get('/ping', (_req, res) => res.json({ success: true }))
   r.get('/healthcheck', (_req, res) => res.sendStatus(200))
 
-  r.post('/login', (req, res) => {
+  const limiter = authRateLimit()
+
+  r.post('/login', limiter, (req, res) => {
     const { username, password } = (req.body ?? {}) as { username?: string; password?: string }
     const user = username && typeof password === 'string' ? ctx.users.authenticate(username, password) : null
-    if (!user) return res.status(401).send('Invalid user or password')
+    if (!user) {
+      log.warn(`[auth] failed login for "${username ?? ''}" from ${req.ip}`)
+      return res.status(401).send('Invalid user or password')
+    }
 
     const returnTokens = req.headers['x-return-tokens'] === 'true'
     const { accessToken, refreshToken } = ctx.tokens.createSession(user, req)
     ctx.users.touch(user.id)
+    ctx.accounts.pull(user).catch(() => {})
 
     const payload = loginPayload(user)
     const userJson = payload.user as typeof payload.user & { accessToken: string; refreshToken: string | null }
@@ -61,7 +68,7 @@ export function authRoutes(ctx: Context): Router {
     res.json(payload)
   })
 
-  r.post('/auth/refresh', (req, res) => {
+  r.post('/auth/refresh', limiter, (req, res) => {
     let refreshToken = (req.cookies as Record<string, string> | undefined)?.refresh_token
     let returnRefresh = false
     const header = req.headers['x-refresh-token']
@@ -93,8 +100,10 @@ export function authRoutes(ctx: Context): Router {
   })
 
   // The web client re-validates its stored token with this on every load.
-  r.post('/api/authorize', authMiddleware(ctx), (req, res) => {
+  r.post('/api/authorize', authMiddleware(ctx), async (req, res) => {
     ctx.users.touch(req.smUser.id)
+    // Native listening on the user's own servers since last time; quick when nothing changed.
+    await ctx.accounts.pull(req.smUser).catch(() => 0)
     res.json(loginPayload(req.smUser))
   })
 

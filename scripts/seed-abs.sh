@@ -62,3 +62,14 @@ fi
 API_KEY="$(curl -fsS "${auth[@]}" -X POST "$ABS/api/api-keys" -H 'content-type: application/json' \
   -d "{\"name\":\"shelfmerge-dev-$(date +%s)\",\"userId\":\"$SVC_ID\",\"isActive\":true}" | json 'd["apiKey"]["apiKey"]')"
 echo "API_KEY=$API_KEY"
+
+# A personal account ("adam") with its own key, for testing account mapping.
+ADAM_ID="$(echo "$USERS" | json '"".join(u["id"] for u in d["users"] if u["username"]=="adam")')"
+if [ -z "$ADAM_ID" ]; then
+  ADAM_ID="$(curl -fsS "${auth[@]}" -X POST "$ABS/api/users" -H 'content-type: application/json' \
+    -d '{"username":"adam","password":"adampass","type":"user","isActive":true,"permissions":{"download":true,"update":false,"delete":false,"upload":false,"accessAllLibraries":true,"accessAllTags":true,"accessExplicitContent":true,"createEreader":false}}' \
+    | json 'd["user"]["id"]')"
+fi
+ADAM_KEY="$(curl -fsS "${auth[@]}" -X POST "$ABS/api/api-keys" -H 'content-type: application/json' \
+  -d "{\"name\":\"adam-dev-$(date +%s)\",\"userId\":\"$ADAM_ID\",\"isActive\":true}" | json 'd["apiKey"]["apiKey"]')"
+echo "ADAM_KEY=$ADAM_KEY"

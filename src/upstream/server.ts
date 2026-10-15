@@ -72,6 +72,11 @@ export class UpstreamServer {
     return `Bearer ${this.apiKey}`
   }
 
+  /** The same server, called with another credential (a user's own account). */
+  withKey(apiKey: string): UpstreamServer {
+    return new UpstreamServer({ key: this.key, url: this.url, label: this.label, apiKey })
+  }
+
   /** Perform a JSON request upstream (no client request involved). */
   async json<T = unknown>(path: string, init: { method?: Dispatcher.HttpMethod; body?: unknown; headers?: Record<string, string> } = {}): Promise<JsonResult<T>> {
     const res = await request(this.url + path, {

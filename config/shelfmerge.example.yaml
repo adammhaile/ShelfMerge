@@ -50,6 +50,10 @@ merged:
 users:
   adam:
     password: change-me
+    # Optional: adam's own API keys. On these servers requests run as adam
+    # (own permissions, own history), and progress flows both ways.
+    accounts:
+      home: eyJhbGciOi...
   guest:
     password: change-me-too
     libraries: [merged:Everything, home:Audiobooks]

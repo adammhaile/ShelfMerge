@@ -36,7 +36,7 @@ export function apiForward(ctx: Context) {
       return res.status(403).send('Not allowed through ShelfMerge')
     }
 
-    const server = await ctx.registry.resolvePathAsync(req.path)
+    const server = ctx.accounts.upstream(req.smUser, await ctx.registry.resolvePathAsync(req.path))
     const path = req.smPath
 
     if (STREAM_PATHS.some((p) => p.test(req.path))) {
@@ -60,8 +60,12 @@ export function sessionForward(ctx: Context, _prefix: '/hls' | '/public') {
     const path = req.smPath
     const m = /^\/(?:session\/)?([0-9a-f-]{36})/i.exec(req.path)
     const row = m ? ctx.sessions.get(m[1]) : undefined
-    const server = row ? ctx.registry.server(row.serverKey) : ctx.registry.resolvePath(req.path)
-    if (!server) return res.sendStatus(404)
+    const base = row ? ctx.registry.server(row.serverKey) : ctx.registry.resolvePath(req.path)
+    if (!base) return res.sendStatus(404)
+    // HLS and public track URLs may arrive without our auth (the apps put the
+    // token in the query); use the session owner's credentials when known.
+    const owner = row ? ctx.users.byId(row.userId) : req.smUser
+    const server = owner ? ctx.accounts.upstream(owner, base) : base
     return server.relay(req, res, stripToken(path))
   }
 }

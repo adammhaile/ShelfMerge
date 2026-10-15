@@ -27,8 +27,9 @@ export function libraryRoutes(ctx: Context): Router {
   // With ?include=filterdata upstream wraps the library: { filterdata, issues, numUserPlaylists, library }.
   r.get('/libraries/:id', async (req, res) => {
     const lib = ctx.catalog.get(req.params.id)!
-    const server = lib.serverKey ? ctx.registry.server(lib.serverKey) : undefined
-    if (!server) return res.sendStatus(404)
+    const base = lib.serverKey ? ctx.registry.server(lib.serverKey) : undefined
+    if (!base) return res.sendStatus(404)
+    const server = ctx.accounts.upstream(req.smUser, base)
     const result = await server.forwardJson<LibraryJSON | { library: LibraryJSON }>(req, req.smPath)
     if (result.status !== 200 || !result.json) return sendResult(res, result)
     const present = (l: LibraryJSON) => ({ ...ctx.catalog.decorate(server.key, l, lib.displayOrder), serverKey: undefined, upstreamName: undefined })

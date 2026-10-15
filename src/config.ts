@@ -17,6 +17,13 @@ export interface UserConfig {
    * or `serverKey:<libraryId>`. Omitted means every library on every server.
    */
   libraries: string[] | null
+  /**
+   * The user's own API keys per server. On those servers every request for
+   * this user is made as their account, so playback, progress and history
+   * land there and their native listening flows back. Servers not listed
+   * use the shared service account.
+   */
+  accounts: Record<string, string>
 }
 
 /**
@@ -57,7 +64,7 @@ interface RawConfig {
   dataDir?: string
   clientDir?: string
   servers?: Record<string, { url: string; apiKey: string; label?: string }>
-  users?: Record<string, { password: string; libraries?: string[] }>
+  users?: Record<string, { password: string; libraries?: string[]; accounts?: Record<string, string | { apiKey: string }> }>
   merged?: Array<{ name?: string; mediaType?: string; sources?: string[]; collapseEditions?: boolean; preferServers?: string[]; keepSeparate?: string[] }>
   prefixLibraryNames?: boolean
   accessTokenExpiry?: number
@@ -83,7 +90,14 @@ export function loadConfig(file = process.env.SHELFMERGE_CONFIG ?? 'config/shelf
       const key = rule.split(':')[0]
       if (!rule.includes(':') || (key !== 'merged' && !servers.some((s) => s.key === key))) throw new Error(`Config: user "${username}" library rule "${rule}" must be "<serverKey|merged>:<library name, id or *>"`)
     }
-    return { username, password: String(u.password), libraries }
+    const accounts: Record<string, string> = {}
+    for (const [key, v] of Object.entries(u.accounts ?? {})) {
+      if (!servers.some((s) => s.key === key)) throw new Error(`Config: user "${username}" has an account for unknown server "${key}"`)
+      const apiKey = typeof v === 'string' ? v : v?.apiKey
+      if (!apiKey) throw new Error(`Config: user "${username}" account for "${key}" needs an apiKey`)
+      accounts[key] = String(apiKey)
+    }
+    return { username, password: String(u.password), libraries, accounts }
   })
   if (!users.length) throw new Error('Config: at least one user is required')
 

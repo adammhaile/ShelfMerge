@@ -197,6 +197,39 @@ export class ProgressStore {
     return toOld(row)
   }
 
+  /**
+   * Apply a progress snapshot from an upstream account as-is. Unlike
+   * createUpdate, which follows Audiobookshelf's incremental rules (an
+   * unfinish resets the position, thresholds may re-finish), this copies
+   * the row verbatim; `lastUpdate` is the upstream timestamp.
+   */
+  importSnapshot(userId: string, serverKey: string, snap: OldMediaProgress): OldMediaProgress {
+    const episodeId = snap.episodeId ?? ''
+    const existing = this.db.prepare('SELECT * FROM media_progress WHERE userId = ? AND libraryItemId = ? AND episodeId = ?').get(userId, snap.libraryItemId, episodeId) as MediaProgressRow | undefined
+    const row: MediaProgressRow = {
+      id: existing?.id ?? uuidv4(),
+      userId,
+      serverKey,
+      libraryItemId: snap.libraryItemId,
+      episodeId,
+      mediaItemId: snap.mediaItemId,
+      mediaItemType: episodeId ? 'podcastEpisode' : 'book',
+      duration: Number(snap.duration) || 0,
+      progress: Number(snap.progress) || 0,
+      currentTime: Number(snap.currentTime) || 0,
+      isFinished: snap.isFinished ? 1 : 0,
+      hideFromContinueListening: snap.hideFromContinueListening ? 1 : 0,
+      ebookLocation: snap.ebookLocation ?? null,
+      ebookProgress: Number(snap.ebookProgress) || 0,
+      createdAt: existing?.createdAt ?? snap.startedAt ?? Date.now(),
+      updatedAt: snap.lastUpdate || Date.now(),
+      finishedAt: snap.isFinished ? (snap.finishedAt ?? existing?.finishedAt ?? Date.now()) : null
+    }
+    if (existing) this.update(row)
+    else this.insert(row)
+    return toOld(row)
+  }
+
   private insert(row: MediaProgressRow) {
     this.db
       .prepare(

@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  # Two real Audiobookshelf containers with the generated fixture library,
+  # then every smoke suite against the proxy in front of them.
+  smoke:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: ./scripts/fetch-client.sh
+      - run: ./scripts/dev-up.sh
+      - name: Start ShelfMerge
+        run: |
+          SHELFMERGE_AUTH_RATE_LIMIT_WINDOW=15000 nohup npx tsx src/index.ts > shelfmerge.log 2>&1 &
+          for i in $(seq 1 60); do curl -fsS localhost:3333/status >/dev/null 2>&1 && break; sleep 1; done
+          sleep 5
+      - run: ./scripts/smoke.sh
+      - run: ./scripts/smoke-multi.sh
+      - run: ./scripts/smoke-polish.sh
+      - run: ./scripts/smoke-merged.sh
+      - run: ./scripts/smoke-editions.sh
+      - run: node scripts/smoke-socket.mjs
+      - run: node scripts/smoke-live.mjs
+      - run: ./scripts/smoke-accounts.sh
+      - name: Proxy log
+        if: always()
+        run: tail -n 100 shelfmerge.log
+
+  image:
+    runs-on: ubuntu-latest
+    needs: [test, smoke]
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

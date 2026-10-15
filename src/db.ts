@@ -271,9 +271,14 @@ const migrations: Array<{ table: string; column: string; ddl: string }> = [
   { table: 'playback_sessions', column: 'snapshot', ddl: "TEXT NOT NULL DEFAULT '{}'" }
 ]
 
+/** `':memory:'` opens a throwaway in-memory database (tests). */
 export function openDb(dataDir: string): Db {
-  fs.mkdirSync(dataDir, { recursive: true })
-  const db = new Database(path.join(dataDir, 'shelfmerge.db'))
+  let db: Db
+  if (dataDir === ':memory:') db = new Database(':memory:')
+  else {
+    fs.mkdirSync(dataDir, { recursive: true })
+    db = new Database(path.join(dataDir, 'shelfmerge.db'))
+  }
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   db.exec(schema)

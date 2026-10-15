@@ -11,7 +11,8 @@ A federating proxy for [Audiobookshelf](https://www.audiobookshelf.org/). Point 
 - `/api/libraries` is served from a cached union of all servers' libraries, so browsing keeps working when one server is down. Library names are prefixed with the server label (`prefixLibraryNames`).
 - **Editions**: in a merged library, copies of the same book are grouped (identical ASIN, else identical ISBN, else the same normalized title and primary author with matching language and abridged flag) and one card is shown, the preferred edition by server order (`preferServers`), then bitrate. The item page of any edition ends with an "Other editions" list linking to the rest, which is how you pick a narrator. On the first play of an edition, the position carries over from another edition you have started (by time when the lengths match within 2 %, else by fraction). Every grouping is logged (`[editions] ...`) and a false match is pinned apart with `keepSeparate`.
 - **Merged libraries** are answered from ShelfMerge's own index (SQLite): every source library is pulled once (expanded items, series, authors), kept current from the item/series/author socket events, and re-pulled every 6 hours. Items, search, filter data, series, authors, narrators, stats and the home-page shelves are computed from the index with the same sort keys, filter groups and collapse-series behaviour as Audiobookshelf. Series and authors with the same name on different servers are shown once. Item detail, covers and playback still go to the owning server; while a user is browsing a merged library, those responses are relabelled with the merged library's id so the web client stays put. Item events from upstream are echoed under each merged library that contains the item.
-- Listening progress, history and stats, bookmarks, collections, playlists and the progress-driven home shelves ("continue listening", "continue series", "listen again") are owned by ShelfMerge, because every ShelfMerge user shares one upstream service account per server. Playback sessions are still created upstream (so transcoding works and the owner sees listening stats for the service user), and ShelfMerge mirrors each sync into its own store. Auto mark-as-finished follows each upstream library's settings.
+- Listening progress, history and stats, bookmarks, collections, playlists and the progress-driven home shelves ("continue listening", "continue series", "listen again") are owned by ShelfMerge, because by default every ShelfMerge user shares one upstream service account per server. Playback sessions are still created upstream (so transcoding works and the owner sees listening stats for the service user), and ShelfMerge mirrors each sync into its own store. Auto mark-as-finished follows each upstream library's settings.
+- **Own accounts.** A user can instead hold their *own* API key for a server (`users.<name>.accounts.<serverKey>`). Every request to that server for that user is then made as their account: their library permissions apply, playback sessions and listening history land on their real account, manual progress edits are written through, and progress made natively on that server (phone app, web) is pulled into ShelfMerge at login, on each `authorize`, and every 5 minutes. Servers without a mapping keep using the service account, so a friend's server can stay on a shared guest user while your own server is really you.
 - Upstream is read-only through ShelfMerge: apart from playback, every mutating request (metadata edits, uploads, scans, deletes, settings) is refused by the proxy with 403 before it reaches a server, whatever the service account is allowed to do. ShelfMerge users have no `update` permission, so the stock UI hides editing controls (and with them "add to collection"; playlists are the per-user tool, collections remain available via the API).
 - Audio, covers and ebooks are relayed with `Range` support. All media bytes pass through ShelfMerge.
 - One socket.io connection per upstream server relays catalog events (items added, updated, removed, …) to connected clients; user events are generated locally.
@@ -37,7 +38,9 @@ npm install
 npm run dev                   # ShelfMerge on :3333; users adam/adam (everything) and guest/guest (one library)
 ```
 
-Smoke tests against the running dev stack:
+Unit tests (`npm test`, vitest) cover the edition matcher, title and name normalization, the index query layer (sorting, filters, collapsed series, search, cross-server series and author grouping, edition hiding), the progress rules, token rotation and the rate limiter. CI runs them, then the smoke suites below against two real Audiobookshelf containers, and publishes the image to GHCR on pushes to `main` and on `v*` tags.
+
+Smoke tests against the running dev stack (start the proxy with `SHELFMERGE_AUTH_RATE_LIMIT_WINDOW=15000` when running them all, since the accounts suite deliberately trips the limiter):
 
 ```bash
 ./scripts/smoke.sh            # single-server flows: login, browse, play, sync, progress, refresh, logout
@@ -47,11 +50,20 @@ Smoke tests against the running dev stack:
 ./scripts/smoke-editions.sh   # one card per book across servers, alternates, progress carry-over, keepSeparate
 node scripts/smoke-socket.mjs # socket auth and user events
 node scripts/smoke-live.mjs   # an upstream edit reaches the index and is relayed under source and merged ids
+./scripts/smoke-accounts.sh   # own-account mapping: sessions credited upstream, write-through, native progress pulled back; rate limit
 ```
 
 ## Configuration
 
-See [config/shelfmerge.example.yaml](config/shelfmerge.example.yaml). The file is re-read when it changes (polled every 2 s): users and servers can be added, removed or re-keyed live; `port` and `dataDir` need a restart. A user removed from the config keeps their progress but can no longer log in. Environment overrides: `PORT`, `SHELFMERGE_CONFIG`, `SHELFMERGE_CLIENT_DIR`, `SHELFMERGE_TOKEN_SECRET`, `ROUTER_BASE_PATH`, `LOG_LEVEL` (`debug`, `info`, `warn`, `error`).
+See [config/shelfmerge.example.yaml](config/shelfmerge.example.yaml).
+
+Login and token refresh are rate limited per IP: 20 failed attempts per 10 minutes, then `429` (`SHELFMERGE_AUTH_RATE_LIMIT` sets the count, `0` disables; `SHELFMERGE_AUTH_RATE_LIMIT_WINDOW` the window in ms). Successful requests never count.
+
+To sign everyone out and replace the JWT signing secret: `npm run rotate-secret` (dev) or `docker exec shelfmerge node dist/tools/rotate-secret.js`, then restart. The file is re-read when it changes (polled every 2 s): users and servers can be added, removed or re-keyed live; `port` and `dataDir` need a restart. A user removed from the config keeps their progress but can no longer log in. Environment overrides: `PORT`, `SHELFMERGE_CONFIG`, `SHELFMERGE_CLIENT_DIR`, `SHELFMERGE_TOKEN_SECRET`, `ROUTER_BASE_PATH`, `LOG_LEVEL` (`debug`, `info`, `warn`, `error`).
+
+## Upgrading Audiobookshelf
+
+ShelfMerge bundles the web client of one Audiobookshelf version and speaks the API as of that version (`ABS_VERSION` in the Dockerfile, `scripts/fetch-client.sh` and `docker-compose.dev.yml`). When a new Audiobookshelf release comes out: bump the version in those three places, rebuild, and run the suites; the smoke tests exercise the real API, so a changed endpoint or shape shows up there. Upstream servers a version ahead of the bundled client usually keep working, since the API changes slowly, but match versions when you can.
 
 ## Behind a reverse proxy
 

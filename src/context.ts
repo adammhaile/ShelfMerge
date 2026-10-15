@@ -12,6 +12,7 @@ import type { CollectionStore } from './collections.js'
 import type { IndexStore } from './index/store.js'
 import type { IndexQuery } from './index/query.js'
 import type { Indexer } from './index/sync.js'
+import type { Accounts } from './accounts.js'
 import type { UserRow } from './db.js'
 
 /** Everything a route handler needs, built once in index.ts. */
@@ -30,6 +31,7 @@ export interface Context {
   indexStore: IndexStore
   indexQuery: IndexQuery
   indexer: Indexer
+  accounts: Accounts
   /**
    * Library each user browsed last. Item detail and playback responses are
    * relabelled to a merged library when the user is browsing one, so the

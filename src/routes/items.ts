@@ -118,7 +118,7 @@ export function itemRoutes(ctx: Context): Router {
 
   // Item detail: inject our progress when the client asked for it.
   r.get('/items/:id', async (req, res) => {
-    const server = await ctx.registry.resolvePathAsync(req.path)
+    const server = ctx.accounts.upstream(req.smUser, await ctx.registry.resolvePathAsync(req.path))
     const result = await server.forwardJson<LibraryItemJSON & { userMediaProgress?: unknown }>(req, pathWithQuery(req))
     if (result.status !== 200 || !result.json) return sendResult(res, result)
     ctx.registry.learn(server.key, result.json)
@@ -142,7 +142,7 @@ export function itemRoutes(ctx: Context): Router {
   // Start playback: upstream creates the session under the service account;
   // we re-own it and seed the start position from our progress.
   const play = async (req: Request, res: Response) => {
-    const server = await ctx.registry.resolvePathAsync(req.path)
+    const server = ctx.accounts.upstream(req.smUser, await ctx.registry.resolvePathAsync(req.path))
     const result = await server.forwardJson<SessionJSON>(req, pathWithQuery(req))
     if (result.status !== 200 || !result.json) return sendResult(res, result)
     const session = result.json
@@ -227,6 +227,11 @@ export function itemRoutes(ctx: Context): Router {
     return mp
   }
 
+  const sessionServer = (req: Request, row: PlaybackSessionRow) => {
+    const server = ctx.registry.server(row.serverKey)
+    return server ? ctx.accounts.upstream(req.smUser, server) : undefined
+  }
+
   const sessionOwner = (req: Request, res: Response): PlaybackSessionRow | null => {
     const row = ctx.sessions.get(req.params.id)
     if (!row) {
@@ -243,7 +248,7 @@ export function itemRoutes(ctx: Context): Router {
   r.get('/session/:id', async (req, res) => {
     const row = sessionOwner(req, res)
     if (!row) return
-    const server = ctx.registry.server(row.serverKey)
+    const server = sessionServer(req, row)
     if (!server) return res.sendStatus(404)
     const result = await server.forwardJson<SessionJSON>(req, pathWithQuery(req))
     if (result.status === 200 && result.json) {
@@ -257,7 +262,7 @@ export function itemRoutes(ctx: Context): Router {
     const row = sessionOwner(req, res)
     if (!row) return
     const body = req.body as SyncBody
-    const server = ctx.registry.server(row.serverKey)
+    const server = sessionServer(req, row)
     if (server) {
       const upstream = await server.json(`/api/session/${row.id}/sync`, { method: 'POST', body }).catch(() => null)
       // Upstream may have forgotten the session (restart, stale cleanup); progress still counts.
@@ -271,7 +276,7 @@ export function itemRoutes(ctx: Context): Router {
     const row = sessionOwner(req, res)
     if (!row) return
     const body = (req.body ?? {}) as SyncBody
-    const server = ctx.registry.server(row.serverKey)
+    const server = sessionServer(req, row)
     if (server) await server.json(`/api/session/${row.id}/close`, { method: 'POST', body: Object.keys(body).length ? body : undefined }).catch(() => null)
     if (body.currentTime !== undefined) applySync(req.smUser.id, row, body)
     ctx.sessions.remove(row.id)
@@ -295,6 +300,10 @@ export function itemRoutes(ctx: Context): Router {
     const resolved = await resolveMediaItemId(ctx, s.libraryItemId, s.episodeId ?? null)
     if (!resolved) return { id: s.id, success: false, error: 'Media item not found' }
     ctx.history.upsertLocal(userId, resolved.serverKey, s, resolved.mediaItemId)
+    const own = ctx.registry.server(resolved.serverKey)
+    if (own && ctx.accounts.hasAccount({ username: ctx.users.byId(userId)?.username ?? '' }, resolved.serverKey)) {
+      ctx.accounts.upstream({ username: ctx.users.byId(userId)!.username }, own).json('/api/session/local', { method: 'POST', body: s }).catch(() => null)
+    }
     const existing = ctx.progress.get(userId, s.libraryItemId, s.episodeId ?? null)
     // Like upstream: only apply when the local session is newer than what we have.
     if (existing && s.updatedAt && existing.lastUpdate > s.updatedAt) {
@@ -331,7 +340,7 @@ export function itemRoutes(ctx: Context): Router {
   // Series detail with ?include=progress: upstream lists the series' items;
   // which of them are finished is ours to answer.
   const seriesWithProgress = async (req: Request, res: Response) => {
-    const server = await ctx.registry.resolvePathAsync(req.path)
+    const server = ctx.accounts.upstream(req.smUser, await ctx.registry.resolvePathAsync(req.path))
     const result = await server.forwardJson<{ progress?: { libraryItemIds: string[]; libraryItemIdsFinished: string[]; isFinished: boolean } }>(req, pathWithQuery(req))
     if (result.status !== 200 || !result.json) return sendResult(res, result)
     ctx.registry.learn(server.key, result.json)
@@ -392,7 +401,7 @@ export function itemRoutes(ctx: Context): Router {
   // Home page shelves: upstream computes them for the service account, so the
   // progress-driven shelves are rebuilt from our store.
   r.get('/libraries/:id/personalized', async (req, res) => {
-    const server = ctx.registry.resolvePath(req.path)
+    const server = ctx.accounts.upstream(req.smUser, ctx.registry.resolvePath(req.path))
     const result = await server.forwardJson<Shelf[]>(req, pathWithQuery(req))
     if (result.status !== 200 || !Array.isArray(result.json)) return sendResult(res, result)
     ctx.registry.learn(server.key, result.json)
