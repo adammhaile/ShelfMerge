@@ -25,6 +25,7 @@ export interface FederatedLibrary extends LibraryJSON {
   upstreamName: string
   merged?: boolean
   sources?: LibrarySource[]
+  editions?: Pick<MergedLibraryConfig, 'collapseEditions' | 'preferServers' | 'keepSeparate'>
 }
 
 interface AuthorizeResponse {
@@ -164,7 +165,8 @@ export class Catalog {
         lastUpdate: num('lastUpdate', (a) => Math.max(...a)) ?? Date.now(),
         upstreamName: m.name,
         merged: true,
-        sources
+        sources,
+        editions: { collapseEditions: m.collapseEditions, preferServers: m.preferServers, keepSeparate: m.keepSeparate }
       }
     })
   }

@@ -17,6 +17,13 @@ export function relabel<T extends { libraryId?: unknown }>(json: T, libraryId: s
   return { ...json, libraryId }
 }
 
+/** Tell the query layer how this merged library collapses editions. */
+export function registerEditions(ctx: Context, lib: FederatedLibrary) {
+  const ids = lib.sources!.map((s) => s.libraryId)
+  const e = lib.editions
+  ctx.indexQuery.useEditions(ids, e?.collapseEditions ? { preferServers: e.preferServers, keepSeparate: new Set(e.keepSeparate) } : null)
+}
+
 /**
  * Merged (virtual) libraries, answered from the index. Mounted before the
  * passthrough library routes; anything for a non-merged library falls
@@ -25,6 +32,7 @@ export function relabel<T extends { libraryId?: unknown }>(json: T, libraryId: s
 export function mergedRoutes(ctx: Context): Router {
   const r = Router()
   const q = ctx.indexQuery
+  const registerEditionsFor = (lib: FederatedLibrary) => registerEditions(ctx, lib)
 
   const merged = (req: Request): FederatedLibrary | null => {
     const lib = ctx.catalog.get(req.params.id)
@@ -36,6 +44,7 @@ export function mergedRoutes(ctx: Context): Router {
     if (!lib) return next()
     if (!ctx.catalog.canAccess(ctx.users.config(req.smUser), lib.id)) return res.sendStatus(403)
     ctx.lastLibrary.set(req.smUser.id, lib.id)
+    registerEditionsFor(lib)
     return handler(req, res, lib)
   }
   const include = (req: Request) =>
@@ -266,6 +275,7 @@ export function mergedRoutes(ctx: Context): Router {
     const last = ctx.lastLibrary.get(req.smUser.id)
     const lib = last ? ctx.catalog.get(last) : undefined
     if (!lib?.merged) return next()
+    registerEditionsFor(lib)
     const detail = q.authorDetail(sources(lib), req.params.id, lib.id)
     if (!detail) return next()
     const inc = include(req)

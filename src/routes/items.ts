@@ -4,6 +4,10 @@ import { sendResult } from '../upstream/server.js'
 import { resolveMediaItemId, fetchItems, type LibraryItemJSON } from './items-helpers.js'
 import type { PlaybackSessionRow } from '../db.js'
 import type { SessionSnapshot } from '../history.js'
+import type { EditionSet } from '../index/editions.js'
+import { formatDuration } from '../index/editions.js'
+import { registerEditions } from './merged.js'
+import { BASE_PATH } from '../app.js'
 import { log } from '../logger.js'
 
 interface SessionJSON extends SessionSnapshot {
@@ -77,6 +81,31 @@ export function itemRoutes(ctx: Context): Router {
     return lib?.merged && lib.sources?.some((s) => s.libraryId === sourceLibraryId) ? lib.id : undefined
   }
 
+  /** The edition set an item belongs to in the merged library the user is browsing, if any. */
+  const editionSetFor = (userId: string, itemId: string): { set: EditionSet; mergedId: string } | null => {
+    const last = ctx.lastLibrary.get(userId)
+    const lib = last ? ctx.catalog.get(last) : undefined
+    if (!lib?.merged || !lib.editions?.collapseEditions) return null
+    registerEditions(ctx, lib)
+    const set = ctx.indexQuery.editionSetOf(lib.sources!.map((s) => s.libraryId), itemId)
+    return set ? { set, mergedId: lib.id } : null
+  }
+
+  /**
+   * The stock clients have no edition picker, but they render the
+   * description as HTML, so the other editions are listed there with links
+   * to their own item pages.
+   */
+  const editionsBlock = (set: EditionSet, itemId: string): string => {
+    const label = (key: string) => ctx.registry.server(key)?.label ?? key
+    const others = set.members.filter((m) => m.id !== itemId)
+    const lines = others.map((m) => {
+      const bits = [label(m.serverKey), m.narratorName ? `narrated by ${m.narratorName}` : null, formatDuration(m.duration)].filter(Boolean).join(', ')
+      return `<li><a href="${BASE_PATH}/item/${m.id}">${bits}</a>${m.id === set.preferred ? ' (shown in library)' : ''}</li>`
+    })
+    return `<p><strong>Other editions</strong></p><ul>${lines.join('')}</ul>`
+  }
+
   // Item detail: inject our progress when the client asked for it.
   r.get('/items/:id', async (req, res) => {
     const server = await ctx.registry.resolvePathAsync(req.path)
@@ -92,6 +121,11 @@ export function itemRoutes(ctx: Context): Router {
     }
     const presented = presentedLibraryId(req.smUser.id, result.json.libraryId)
     if (presented) result.json.libraryId = presented
+    const ed = editionSetFor(req.smUser.id, req.params.id)
+    if (ed) {
+      const meta = result.json.media.metadata as { description?: string | null }
+      meta.description = `${meta.description ?? ''}${meta.description ? '<br>' : ''}${editionsBlock(ed.set, req.params.id)}`
+    }
     sendResult(res, result, result.json)
   })
 
@@ -105,7 +139,27 @@ export function itemRoutes(ctx: Context): Router {
     ctx.registry.learn(server.key, session)
 
     const episodeId = req.params.episodeId ?? null
-    const mp = ctx.progress.get(req.smUser.id, req.params.id, episodeId)
+    let mp = ctx.progress.get(req.smUser.id, req.params.id, episodeId)
+    // First play of an edition: carry the position over from another edition
+    // of the same book (by time when the lengths match, by fraction otherwise).
+    if (!mp && !episodeId) {
+      const ed = editionSetFor(req.smUser.id, req.params.id)
+      const me = ed?.set.members.find((m) => m.id === req.params.id)
+      const other = ed?.set.members.map((m) => ({ m, mp: ctx.progress.get(req.smUser.id, m.id) })).find((o) => o.mp && o.m.id !== req.params.id)
+      if (ed && me && other?.mp) {
+        const sameLength = other.m.duration && me.duration && Math.abs(other.m.duration - me.duration) / other.m.duration <= 0.02
+        const currentTime = other.mp.isFinished ? 0 : sameLength ? other.mp.currentTime : (other.mp.progress || 0) * me.duration
+        mp = ctx.progress.createUpdate(req.smUser.id, server.key, String(session.bookId ?? session.libraryItem?.media?.id ?? ''), {
+          libraryItemId: req.params.id,
+          duration: me.duration,
+          currentTime,
+          progress: me.duration ? currentTime / me.duration : 0,
+          isFinished: other.mp.isFinished,
+          finishedAt: other.mp.finishedAt
+        })
+        log.info(`[editions] seeded progress for ${req.params.id.slice(0, 8)} from ${other.m.id.slice(0, 8)} (${sameLength ? 'same length' : 'by fraction'})`)
+      }
+    }
     let startTime = 0
     if (mp && !mp.isFinished) startTime = Number(mp.currentTime) || 0
     session.userId = req.smUser.id

@@ -34,6 +34,13 @@ merged:
   - name: Everything
     mediaType: book
     sources: ['*']
+    # Show one card when the same book exists more than once (default true).
+    collapseEditions: true
+    # Which copy to show, by server, most preferred first (default: config order).
+    preferServers: [home, bob]
+    # Item ids that must never be grouped, to pin a false match apart.
+    # Groupings are logged as "[editions] ..." with the ids.
+    keepSeparate: []
 
 # People who log into ShelfMerge. Progress and bookmarks are kept per
 # ShelfMerge user; upstream only ever sees the service account.

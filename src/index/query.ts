@@ -1,5 +1,6 @@
 import type { IndexStore, ItemRow, SeriesRow, AuthorRow } from './store.js'
 import { toMinified, type StoredItem } from './minify.js'
+import { buildEditionSets, type EditionOptions, type EditionSet } from './editions.js'
 import type { ProgressStore, OldMediaProgress } from '../progress.js'
 
 /** Parsed index row with the bits queries touch, cached per library. */
@@ -93,6 +94,9 @@ const cmpSeqText = (a: string | null | undefined, b: string | null | undefined) 
  */
 export class IndexQuery {
   private readonly cache = new Map<string, IndexedItem[]>()
+  /** Edition collapsing per scope (sorted library ids joined), registered by the merged routes. */
+  private readonly editionOptions = new Map<string, EditionOptions>()
+  private readonly editionSets = new Map<string, Map<string, EditionSet>>()
 
   constructor(
     private readonly store: IndexStore,
@@ -104,6 +108,61 @@ export class IndexQuery {
   invalidate(libraryId?: string) {
     if (libraryId) this.cache.delete(libraryId)
     else this.cache.clear()
+    this.editionSets.clear()
+  }
+
+  // ---- editions ----
+
+  private scopeKey(libraryIds: string[]) {
+    return [...libraryIds].sort().join('|')
+  }
+
+  /** Enable (or disable, with null) edition collapsing for a set of source libraries. */
+  useEditions(libraryIds: string[], opts: EditionOptions | null) {
+    const key = this.scopeKey(libraryIds)
+    const prev = this.editionOptions.get(key)
+    if (!opts) {
+      if (prev) {
+        this.editionOptions.delete(key)
+        this.editionSets.delete(key)
+      }
+      return
+    }
+    if (prev && prev.preferServers.join() === opts.preferServers.join() && [...prev.keepSeparate].join() === [...opts.keepSeparate].join()) return
+    this.editionOptions.set(key, opts)
+    this.editionSets.delete(key)
+  }
+
+  /** Edition sets for a scope (computed over every item, hidden ones included). */
+  private sets(libraryIds: string[]): Map<string, EditionSet> {
+    const key = this.scopeKey(libraryIds)
+    const opts = this.editionOptions.get(key)
+    if (!opts) return new Map()
+    let sets = this.editionSets.get(key)
+    if (!sets) {
+      // Decisions are logged only when they differ from the last computation,
+      // since the sets are rebuilt after every index change.
+      sets = buildEditionSets(libraryIds.flatMap((id) => this.libraryItems(id)), opts, false)
+      const signature = [...new Set([...sets.values()])].map((s) => s.members.map((m) => m.id).join(',') + '>' + s.preferred).sort().join(';')
+      if (this.editionSignatures.get(key) !== signature) {
+        this.editionSignatures.set(key, signature)
+        buildEditionSets(libraryIds.flatMap((id) => this.libraryItems(id)), opts, true)
+      }
+      this.editionSets.set(key, sets)
+    }
+    return sets
+  }
+  private readonly editionSignatures = new Map<string, string>()
+
+  editionSetOf(libraryIds: string[], itemId: string): EditionSet | undefined {
+    return this.sets(libraryIds).get(itemId)
+  }
+
+  /** Ids hidden in this scope because a preferred edition stands in for them. */
+  hiddenEditions(libraryIds: string[]): Set<string> {
+    const hidden = new Set<string>()
+    for (const [id, set] of this.sets(libraryIds)) if (set.preferred !== id) hidden.add(id)
+    return hidden
   }
 
   minify(item: StoredItem): Record<string, unknown> {
@@ -136,8 +195,12 @@ export class IndexQuery {
     return items
   }
 
+  /** Items visible in this scope: everything indexed, minus hidden alternate editions. */
   all(libraryIds: string[]): IndexedItem[] {
-    return libraryIds.flatMap((id) => this.libraryItems(id))
+    const items = libraryIds.flatMap((id) => this.libraryItems(id))
+    if (!this.editionOptions.has(this.scopeKey(libraryIds))) return items
+    const hidden = this.hiddenEditions(libraryIds)
+    return hidden.size ? items.filter((it) => !hidden.has(it.row.id)) : items
   }
 
   private progressMap(userId: string): Map<string, OldMediaProgress> {
@@ -416,6 +479,7 @@ export class IndexQuery {
 
     const total = items.length
     const page = q.limit ? items.slice(q.offset, q.offset + q.limit) : items
+    const sets = this.sets(q.libraryIds)
     const results = page.map((it) => {
       const json = toMinified(it.item, prefixes) as Record<string, unknown>
       if (filtered.seriesIds) {
@@ -424,6 +488,8 @@ export class IndexQuery {
       }
       const c = collapsed.get(it.row.id)
       if (c) json.collapsedSeries = c
+      const set = sets.get(it.row.id)
+      if (set) json.editions = { count: set.members.length, alternates: set.members.filter((m) => m.id !== it.row.id).map(({ id, serverKey, narratorName, duration }) => ({ id, serverKey, narratorName, duration })) }
       return json
     })
     return { results, total }

@@ -28,6 +28,12 @@ export interface MergedLibraryConfig {
   name: string
   mediaType: 'book' | 'podcast'
   sources: string[]
+  /** Show one card per book when the same book exists on several servers. */
+  collapseEditions: boolean
+  /** Server keys in order of preference for which edition is shown. Defaults to the config's server order. */
+  preferServers: string[]
+  /** Item ids that must never be collapsed (to pin a false match apart). */
+  keepSeparate: string[]
 }
 
 export interface Config {
@@ -52,7 +58,7 @@ interface RawConfig {
   clientDir?: string
   servers?: Record<string, { url: string; apiKey: string; label?: string }>
   users?: Record<string, { password: string; libraries?: string[] }>
-  merged?: Array<{ name?: string; mediaType?: string; sources?: string[] }>
+  merged?: Array<{ name?: string; mediaType?: string; sources?: string[]; collapseEditions?: boolean; preferServers?: string[]; keepSeparate?: string[] }>
   prefixLibraryNames?: boolean
   accessTokenExpiry?: number
   refreshTokenExpiry?: number
@@ -88,7 +94,16 @@ export function loadConfig(file = process.env.SHELFMERGE_CONFIG ?? 'config/shelf
       const key = rule.split(':')[0]
       if (rule !== '*' && (!rule.includes(':') || !servers.some((s) => s.key === key))) throw new Error(`Config: merged library #${i + 1} source "${rule}" must be "*" or "<serverKey>:<library name, id or *>"`)
     }
-    return { name: m.name?.trim() || 'Everything', mediaType, sources }
+    const preferServers = (m.preferServers ?? []).map(String)
+    for (const key of preferServers) if (!servers.some((s) => s.key === key)) throw new Error(`Config: merged library #${i + 1} preferServers has unknown server "${key}"`)
+    return {
+      name: m.name?.trim() || 'Everything',
+      mediaType,
+      sources,
+      collapseEditions: m.collapseEditions ?? true,
+      preferServers: [...preferServers, ...servers.map((s) => s.key).filter((k) => !preferServers.includes(k))],
+      keepSeparate: (m.keepSeparate ?? []).map(String)
+    }
   })
   const names = new Set<string>()
   for (const m of merged) {
