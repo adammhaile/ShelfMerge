@@ -644,6 +644,36 @@ export class IndexQuery {
     })
   }
 
+  /**
+   * Author landing page: the author (any member id of the group) with their
+   * books across all source libraries, and those books grouped by series.
+   * Mirrors AuthorController.findOne upstream.
+   */
+  authorDetail(libraryIds: string[], authorId: string, libraryIdForJson: string) {
+    const g = this.expandGroup(this.authorGroups(libraryIds), authorId)
+    if (!g) return null
+    const all = this.all(libraryIds)
+    const prefixes = this.prefixes()
+    const books = all.filter((it) => it.authorIds.some((a) => g.ids.has(a)))
+    const seriesGroups = this.seriesGroups(libraryIds)
+    const seriesMap = new Map<string, { id: string; name: string; items: Array<Record<string, unknown>> }>()
+    for (const it of books) {
+      for (const s of it.item.media.metadata.series ?? []) {
+        const sg = this.expandGroup(seriesGroups, s.id)
+        const canonical = sg?.canonical ?? s.id
+        const name = sg?.members[0].name ?? s.name
+        const json = toMinified(it.item, prefixes) as { media: { metadata: Record<string, unknown> } }
+        json.media.metadata.series = { id: canonical, name, nameIgnorePrefix: sg?.members[0].nameIgnorePrefix ?? name, sequence: s.sequence ?? null }
+        const entry = seriesMap.get(canonical) ?? { id: canonical, name, items: [] }
+        entry.items.push(json as unknown as Record<string, unknown>)
+        seriesMap.set(canonical, entry)
+      }
+    }
+    for (const entry of seriesMap.values()) entry.items.sort((a, b) => cmpSeqText((a.media as { metadata: { series: { sequence: string | null } } }).metadata.series.sequence, (b.media as { metadata: { series: { sequence: string | null } } }).metadata.series.sequence))
+    const author = this.oldAuthor(g.canonical, g.members, books.length, libraryIdForJson)
+    return { author, libraryItems: books.map((it) => toMinified(it.item, prefixes)), series: [...seriesMap.values()] }
+  }
+
   narrators(libraryIds: string[]) {
     const counts = new Map<string, number>()
     for (const it of this.all(libraryIds)) for (const n of it.narrators) counts.set(n, (counts.get(n) ?? 0) + 1)

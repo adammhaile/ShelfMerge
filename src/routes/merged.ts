@@ -260,6 +260,23 @@ export function mergedRoutes(ctx: Context): Router {
     })
   )
 
+  // Author landing page while browsing a merged library: books from every
+  // source server, not just the one that owns the author id.
+  r.get('/authors/:id', (req, res, next) => {
+    const last = ctx.lastLibrary.get(req.smUser.id)
+    const lib = last ? ctx.catalog.get(last) : undefined
+    if (!lib?.merged) return next()
+    const detail = q.authorDetail(sources(lib), req.params.id, lib.id)
+    if (!detail) return next()
+    const inc = include(req)
+    const json: Record<string, unknown> = { ...detail.author, numBooks: undefined, lastFirst: undefined }
+    if (inc.includes('items')) {
+      json.libraryItems = detail.libraryItems.map((li) => relabel(li as { libraryId?: unknown }, lib.id))
+      if (inc.includes('series')) json.series = detail.series.map((s) => ({ ...s, items: s.items.map((li) => relabel(li as { libraryId?: unknown }, lib.id)) }))
+    }
+    res.json(json)
+  })
+
   // Anything else under a merged library id is not a thing (scans, downloads,
   // feeds...), except collections and playlists, which live in ShelfMerge.
   r.all('/libraries/:id/:what/*', (req, res, next) => (merged(req) && !['collections', 'playlists'].includes(req.params.what) ? res.sendStatus(404) : next()))

@@ -66,7 +66,6 @@ nginx needs the usual WebSocket upgrade headers on `/socket.io/` and `/audiobook
 ## Limitations
 
 - The same book on two servers shows up twice in a merged library (edition collapsing is the next phase).
-- An author's page (`/author/:id`) lists that author's books from one server only; the merged library's author *list* and author *filter* do span servers.
 - Merged libraries are book libraries; podcast libraries are passthrough only.
 - Metadata edits, uploads, scans and other admin actions are hidden in the UI and refused by the proxy.
 - Collections have no UI (the client ties it to the edit permission); playlists are per user and fully supported.
