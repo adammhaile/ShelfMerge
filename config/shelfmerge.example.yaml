@@ -55,7 +55,8 @@ merged:
 # libraries. Omit it for access to everything.
 users:
   adam:
-    password: ${ADAM_PASSWORD:-change-me-on-first-login}
+    # Initial password only: log in once, then change it on the account page.
+    password: change-me
     # Sees Settings -> Users in the web client: add users, reset passwords, deactivate.
     admin: true
     # Optional: adam's own API keys. On these servers requests run as adam
@@ -63,5 +64,5 @@ users:
     accounts:
       home: ${ADAM_HOME_KEY}
   guest:
-    password: change-me-too
+    password: change-me
     libraries: [merged:Everything, home:Audiobooks]
