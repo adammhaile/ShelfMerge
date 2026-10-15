@@ -81,14 +81,24 @@ export function itemRoutes(ctx: Context): Router {
     return lib?.merged && lib.sources?.some((s) => s.libraryId === sourceLibraryId) ? lib.id : undefined
   }
 
-  /** The edition set an item belongs to in the merged library the user is browsing, if any. */
-  const editionSetFor = (userId: string, itemId: string): { set: EditionSet; mergedId: string } | null => {
+  /**
+   * The edition set an item belongs to: in the merged library the user is
+   * browsing if that applies, else in any accessible merged library that
+   * contains the item's source library (a reload on an item page fetches
+   * the item before the client re-selects its library).
+   */
+  const editionSetFor = (req: Request, itemId: string, sourceLibraryId?: string | null): { set: EditionSet; mergedId: string } | null => {
+    const userId = req.smUser.id
+    const source = sourceLibraryId ?? ctx.registry.lookup(itemId)?.libraryId
     const last = ctx.lastLibrary.get(userId)
-    const lib = last ? ctx.catalog.get(last) : undefined
-    if (!lib?.merged || !lib.editions?.collapseEditions) return null
-    registerEditions(ctx, lib)
-    const set = ctx.indexQuery.editionSetOf(lib.sources!.map((s) => s.libraryId), itemId)
-    return set ? { set, mergedId: lib.id } : null
+    const candidates = ctx.catalog.forUser(ctx.users.config(req.smUser)).filter((l) => l.merged && l.editions?.collapseEditions && (!source || l.sources!.some((s) => s.libraryId === source)))
+    candidates.sort((a, b) => (a.id === last ? -1 : b.id === last ? 1 : 0))
+    for (const lib of candidates) {
+      registerEditions(ctx, lib)
+      const set = ctx.indexQuery.editionSetOf(lib.sources!.map((s) => s.libraryId), itemId)
+      if (set) return { set, mergedId: lib.id }
+    }
+    return null
   }
 
   /**
@@ -121,7 +131,7 @@ export function itemRoutes(ctx: Context): Router {
     }
     const presented = presentedLibraryId(req.smUser.id, result.json.libraryId)
     if (presented) result.json.libraryId = presented
-    const ed = editionSetFor(req.smUser.id, req.params.id)
+    const ed = editionSetFor(req, req.params.id, ctx.registry.lookup(req.params.id)?.libraryId)
     if (ed) {
       const meta = result.json.media.metadata as { description?: string | null }
       meta.description = `${meta.description ?? ''}${meta.description ? '<br>' : ''}${editionsBlock(ed.set, req.params.id)}`
@@ -143,7 +153,7 @@ export function itemRoutes(ctx: Context): Router {
     // First play of an edition: carry the position over from another edition
     // of the same book (by time when the lengths match, by fraction otherwise).
     if (!mp && !episodeId) {
-      const ed = editionSetFor(req.smUser.id, req.params.id)
+      const ed = editionSetFor(req, req.params.id, ctx.registry.lookup(session.libraryItemId)?.libraryId)
       const me = ed?.set.members.find((m) => m.id === req.params.id)
       const other = ed?.set.members.map((m) => ({ m, mp: ctx.progress.get(req.smUser.id, m.id) })).find((o) => o.mp && o.m.id !== req.params.id)
       if (ed && me && other?.mp) {
