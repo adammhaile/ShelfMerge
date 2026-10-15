@@ -1,0 +1,6 @@
+# Automatic HTTPS for ShelfMerge. Caddy obtains and renews the certificate
+# itself; the domain must resolve to this host and ports 80/443 be reachable.
+{$SHELFMERGE_DOMAIN} {
+    encode gzip
+    reverse_proxy shelfmerge:3333
+}

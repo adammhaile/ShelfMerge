@@ -22,10 +22,15 @@ A federating proxy for [Audiobookshelf](https://www.audiobookshelf.org/). Point 
 
 ```bash
 cp config/shelfmerge.example.yaml config/shelfmerge.yaml   # edit servers and users
+cp .env.example .env                                         # the API keys and passwords the YAML references as ${VAR}
 docker compose up -d --build
 ```
 
 Open <http://localhost:3333> and log in with a user from the config. In the mobile apps, add `http://<host>:3333` as a server.
+
+For HTTPS on the open internet, set `SHELFMERGE_DOMAIN` in `.env` and run `docker compose --profile caddy up -d`; Caddy terminates TLS with an automatic certificate and proxies to ShelfMerge. If you already run a reverse proxy, skip the profile and point it at port 3333 (see below).
+
+**Backups**: everything ShelfMerge owns (users, progress, history, playlists, the index, the token secret) is in the `/data` volume, a single SQLite file; copy it while the container is stopped, or `sqlite3 /data/shelfmerge.db ".backup /backup/shelfmerge.db"` while running. The config and `.env` are the rest. The index is a cache and rebuilds itself if lost.
 
 ## Development
 

@@ -1,4 +1,6 @@
 # ShelfMerge configuration. Copy to shelfmerge.yaml and edit.
+# Any value may be written as ${ENV_VAR} (or ${ENV_VAR:-default}) and provided
+# through the environment or a .env file, keeping keys out of this file.
 
 port: 3333
 
@@ -13,11 +15,11 @@ dataDir: /data
 servers:
   home:
     url: https://abs.example.com
-    apiKey: eyJhbGciOi...
+    apiKey: ${HOME_API_KEY}
     label: Home
   bob:
     url: https://abs.bob.example
-    apiKey: eyJhbGciOi...
+    apiKey: ${BOB_API_KEY}
     label: Bob
 
 # Prefix library names with the server label ("Bob: Audiobooks").
@@ -49,11 +51,11 @@ merged:
 # libraries. Omit it for access to everything.
 users:
   adam:
-    password: change-me
+    password: ${ADAM_PASSWORD}
     # Optional: adam's own API keys. On these servers requests run as adam
     # (own permissions, own history), and progress flows both ways.
     accounts:
-      home: eyJhbGciOi...
+      home: ${ADAM_HOME_KEY}
   guest:
     password: change-me-too
     libraries: [merged:Everything, home:Audiobooks]

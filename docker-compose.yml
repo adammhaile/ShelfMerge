@@ -1,16 +1,42 @@
-# Production-style run: ShelfMerge only. Point it at your real Audiobookshelf
-# servers in config/shelfmerge.yaml (see config/shelfmerge.example.yaml).
+# Production run. Point config/shelfmerge.yaml at your Audiobookshelf servers
+# (see config/shelfmerge.example.yaml); secrets can be referenced as ${VAR}
+# in the YAML and provided in a .env file next to this compose file.
+#
+#   docker compose up -d                       # ShelfMerge on :3333 (plain HTTP, behind your own proxy)
+#   docker compose --profile caddy up -d       # plus Caddy with automatic HTTPS; set SHELFMERGE_DOMAIN in .env
 services:
   shelfmerge:
     build: .
-    image: shelfmerge:local
+    image: ghcr.io/adammhaile/shelfmerge:latest
     container_name: shelfmerge
     ports:
       - "3333:3333"
     volumes:
       - ./config:/config
       - shelfmerge-data:/data
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    container_name: shelfmerge-caddy
+    profiles: [caddy]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - SHELFMERGE_DOMAIN=${SHELFMERGE_DOMAIN:?set SHELFMERGE_DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - shelfmerge
     restart: unless-stopped
 
 volumes:
   shelfmerge-data:
+  caddy-data:
+  caddy-config:

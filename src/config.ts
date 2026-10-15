@@ -72,9 +72,23 @@ interface RawConfig {
   refreshTokenGracePeriod?: number
 }
 
+/**
+ * `${NAME}` and `${NAME:-default}` in the config file are replaced from the
+ * environment, so API keys and passwords can live in an env file instead
+ * of the YAML. A missing variable without a default is an error.
+ */
+export function substituteEnv(text: string, env: NodeJS.ProcessEnv = process.env): string {
+  return text.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g, (_m, name: string, fallback: string | undefined) => {
+    const v = env[name]
+    if (v !== undefined && v !== '') return v
+    if (fallback !== undefined) return fallback
+    throw new Error(`Config: environment variable ${name} is not set`)
+  })
+}
+
 export function loadConfig(file = process.env.SHELFMERGE_CONFIG ?? 'config/shelfmerge.yaml'): Config {
   const abs = path.resolve(file)
-  const raw = YAML.parse(fs.readFileSync(abs, 'utf8')) as RawConfig
+  const raw = YAML.parse(substituteEnv(fs.readFileSync(abs, 'utf8'))) as RawConfig
   const baseDir = path.dirname(abs)
 
   const servers = Object.entries(raw.servers ?? {}).map(([key, s]) => {
