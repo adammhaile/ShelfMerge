@@ -35,6 +35,8 @@ For HTTPS, put your reverse proxy in front of port 3333 (see below). If you have
 
 **Backups**: everything ShelfMerge owns (users, progress, history, playlists, the index, the token secret) is in the `/data` volume, a single SQLite file; copy it while the container is stopped, or `sqlite3 /data/shelfmerge.db ".backup /backup/shelfmerge.db"` while running. The config and `.env` are the rest. The index is a cache and rebuilds itself if lost.
 
+A worked example on a DigitalOcean droplet with HTTPS: [docs/digitalocean.md](docs/digitalocean.md).
+
 ## Development
 
 Requirements: Node 22+, Docker.
