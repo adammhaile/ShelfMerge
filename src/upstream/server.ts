@@ -1,8 +1,19 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { Readable } from 'node:stream'
+import { Readable, PassThrough } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { request, type Dispatcher } from 'undici'
 import type { ServerConfig } from '../config.js'
 import { log } from '../logger.js'
+
+/**
+ * Bytes buffered between the upstream read and the client write while
+ * relaying media. With Node's defaults (16-64 KB) the two legs of a
+ * long-distance relay (origin -> proxy -> client) stall each other: every
+ * hiccup on one side shrinks the other side's TCP window. A few MB lets each
+ * leg run at its own pace. Memory cost is per active download.
+ */
+const RELAY_BUFFER = Math.max(1, Number(process.env.SHELFMERGE_RELAY_BUFFER_MB) || 8) * 1024 * 1024
+const UPSTREAM_READ_BUFFER = 1024 * 1024
 
 export class UpstreamError extends Error {
   constructor(
@@ -138,7 +149,7 @@ export class UpstreamServer {
 
     let upstream: Dispatcher.ResponseData
     try {
-      upstream = await request(this.url + path, { method, headers, body })
+      upstream = await request(this.url + path, { method, headers, body, highWaterMark: UPSTREAM_READ_BUFFER })
     } catch (err) {
       log.error(`[upstream:${this.key}] ${method} ${path} failed:`, (err as Error).message)
       if (!res.headersSent) {
@@ -160,18 +171,15 @@ export class UpstreamServer {
       return
     }
 
-    await new Promise<void>((resolve) => {
-      upstream.body.on('error', (err) => {
-        log.warn(`[upstream:${this.key}] stream error on ${path}:`, err.message)
-        res.destroy()
-        resolve()
-      })
-      res.on('close', () => {
-        upstream.body.destroy()
-        resolve()
-      })
-      upstream.body.pipe(res).on('finish', resolve)
-    })
+    try {
+      await pipeline(upstream.body, new PassThrough({ highWaterMark: RELAY_BUFFER }), res)
+    } catch (err) {
+      // A client that stops listening (seek, skip, closed app) ends the pipeline; that is normal.
+      const code = (err as NodeJS.ErrnoException).code
+      if (code !== 'ERR_STREAM_PREMATURE_CLOSE' && code !== 'UND_ERR_ABORTED' && code !== 'ECONNRESET') log.warn(`[upstream:${this.key}] stream error on ${path}:`, (err as Error).message)
+      upstream.body.destroy()
+      if (!res.destroyed) res.destroy()
+    }
   }
 
   /**
