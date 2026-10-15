@@ -61,6 +61,12 @@ export interface Config {
   merged: MergedLibraryConfig[]
   /** Prefix library names with the server label. Defaults to on when there is more than one server. */
   prefixLibraryNames: boolean
+  /**
+   * Let users change their own password in the web UI (default true). Turn
+   * off when several instances share one config, so the YAML hash stays the
+   * single source of truth.
+   */
+  allowPasswordChange: boolean
   /** Seconds. Defaults match Audiobookshelf (1 h access, 30 d refresh). */
   accessTokenExpiry: number
   refreshTokenExpiry: number
@@ -75,6 +81,7 @@ interface RawConfig {
   users?: Record<string, { password?: string; admin?: boolean; libraries?: string[]; accounts?: Record<string, string | { apiKey: string }> } | null>
   merged?: Array<{ name?: string; mediaType?: string; sources?: string[]; collapseEditions?: boolean; preferServers?: string[]; keepSeparate?: string[] }>
   prefixLibraryNames?: boolean
+  allowPasswordChange?: boolean
   accessTokenExpiry?: number
   refreshTokenExpiry?: number
   refreshTokenGracePeriod?: number
@@ -182,6 +189,7 @@ export function parseConfig(text: string, baseDir: string = path.join(process.cw
     users,
     merged,
     prefixLibraryNames: raw.prefixLibraryNames ?? servers.length > 1,
+    allowPasswordChange: raw.allowPasswordChange ?? true,
     accessTokenExpiry: raw.accessTokenExpiry ?? 60 * 60,
     refreshTokenExpiry: raw.refreshTokenExpiry ?? 30 * 24 * 60 * 60,
     refreshTokenGracePeriod: raw.refreshTokenGracePeriod ?? 10 * 60

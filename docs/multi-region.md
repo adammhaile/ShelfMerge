@@ -60,7 +60,9 @@ docker run --rm -it ghcr.io/adammhaile/shelfmerge:latest node dist/tools/user.js
 npm run user -- hash
 ```
 
-It prints a 60-character string starting with `$2a$10$`; paste it as the user's `password:`. Hashes are safe to keep in the repo: they cannot be turned back into the password. To change someone's password, generate a new hash and commit it; both instances apply it within a minute and sign that user out so they log in again. (The web UI's "change password" and the admin Users page still work, but only on the instance where they're used; for a shared setup, the YAML hash is the source of truth.)
+It prints a 60-character string starting with `$2a$10$`; paste it as the user's `password:`. Hashes are safe to keep in the repo: they cannot be turned back into the password. To change someone's password, generate a new hash and commit it; both instances apply it within a minute and sign that user out so they log in again.
+
+A password changed in the web UI (account page, or the admin Users page) only reaches the instance it was changed on, and a later hash change in the YAML overrides it. For a shared setup, make the YAML the only way by adding `allowPasswordChange: false` at the top level of the config; the account page's form then gets a clear refusal.
 
 ## 2. A read token for the repo
 

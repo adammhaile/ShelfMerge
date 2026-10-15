@@ -167,6 +167,7 @@ export function meRoutes(ctx: Context): Router {
   })
 
   r.patch('/me/password', (req, res) => {
+    if (!ctx.cfg.allowPasswordChange) return res.status(403).json({ error: 'Password changes are managed by the ShelfMerge administrator' })
     const { password, newPassword } = req.body as { password?: string; newPassword?: string }
     if (typeof password !== 'string' || typeof newPassword !== 'string') return res.status(400).json({ error: 'Invalid request' })
     if (!ctx.users.authenticate(req.smUser.username, password)) return res.status(403).json({ error: 'Invalid password' })

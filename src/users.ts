@@ -95,12 +95,14 @@ export class UserStore {
           this.insert(u.username, '', 'config')
           continue
         }
-        this.insert(u.username, hash ? u.password! : bcrypt.hashSync(u.password, 10), 'config')
+        this.insert(u.username, hash ? u.password! : bcrypt.hashSync(u.password, 10), 'config', hash ? u.password! : null)
         log.info(`[users] created user "${u.username}"`)
       } else {
         if (existing.source !== 'config') this.db.prepare("UPDATE users SET source = 'config' WHERE id = ?").run(existing.id)
-        if (hash && existing.passwordHash !== u.password) {
-          this.db.prepare('UPDATE users SET passwordHash = ? WHERE id = ?').run(u.password, existing.id)
+        // A hash in the config is applied when the *config* changed it, not merely
+        // because it differs from the stored one: a password changed in the UI stays.
+        if (hash && existing.configHash !== u.password) {
+          this.db.prepare('UPDATE users SET passwordHash = ?, configHash = ? WHERE id = ?').run(u.password, u.password, existing.id)
           this.tokens.invalidateAllForUser(existing.id)
           log.info(`[users] password hash for "${u.username}" set from config, sessions invalidated`)
         } else if (!existing.passwordHash && u.password) {
@@ -111,9 +113,9 @@ export class UserStore {
     }
   }
 
-  private insert(username: string, passwordHash: string, source: UserRow['source']): UserRow {
-    const row = { id: uuidv4(), username, passwordHash, createdAt: Date.now(), source }
-    this.db.prepare('INSERT INTO users (id, username, passwordHash, createdAt, source) VALUES (@id, @username, @passwordHash, @createdAt, @source)').run(row)
+  private insert(username: string, passwordHash: string, source: UserRow['source'], configHash: string | null = null): UserRow {
+    const row = { id: uuidv4(), username, passwordHash, createdAt: Date.now(), source, configHash }
+    this.db.prepare('INSERT INTO users (id, username, passwordHash, createdAt, source, configHash) VALUES (@id, @username, @passwordHash, @createdAt, @source, @configHash)').run(row)
     return this.byId(row.id)!
   }
 

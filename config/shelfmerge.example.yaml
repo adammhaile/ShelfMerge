@@ -22,6 +22,11 @@ servers:
     apiKey: ${BOB_API_KEY}
     label: Bob
 
+# Let users change their own password on the web client's account page
+# (default true). Set to false when several instances share this file, so
+# the password hashes here stay the single source of truth.
+allowPasswordChange: true
+
 # Prefix library names with the server label ("Bob: Audiobooks").
 # Defaults to on when there is more than one server.
 prefixLibraryNames: true

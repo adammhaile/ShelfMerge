@@ -135,6 +135,7 @@ function watchConfig(ctx: Context) {
   const apply = (next: Config) => {
     ctx.cfg.users = next.users
     ctx.cfg.prefixLibraryNames = next.prefixLibraryNames
+    ctx.cfg.allowPasswordChange = next.allowPasswordChange
     ctx.cfg.merged = next.merged
     ctx.users.syncFromConfig(next)
     const change = ctx.registry.setServers(next.servers.map((s) => new UpstreamServer(s)))

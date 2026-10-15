@@ -13,6 +13,8 @@ export interface UserRow {
   isActive: number
   /** 'config' for users listed in the YAML, 'admin' for users created from the web UI. */
   source: 'config' | 'admin'
+  /** The last bcrypt hash applied from the config, so a changed YAML hash wins but a UI change is not reverted. */
+  configHash: string | null
 }
 
 export interface AuthSessionRow {
@@ -271,6 +273,7 @@ CREATE TABLE IF NOT EXISTS kv (
 const migrations: Array<{ table: string; column: string; ddl: string }> = [
   { table: 'users', column: 'isActive', ddl: 'INTEGER NOT NULL DEFAULT 1' },
   { table: 'users', column: 'source', ddl: "TEXT NOT NULL DEFAULT 'config'" },
+  { table: 'users', column: 'configHash', ddl: 'TEXT' },
   { table: 'id_map', column: 'libraryId', ddl: 'TEXT' },
   { table: 'playback_sessions', column: 'libraryId', ddl: "TEXT NOT NULL DEFAULT ''" },
   { table: 'playback_sessions', column: 'snapshot', ddl: "TEXT NOT NULL DEFAULT '{}'" }
