@@ -37,6 +37,9 @@ function requestBody(req: IncomingMessage, headers: Record<string, string>): Rea
   return req
 }
 
+/** Request headers that would let upstream answer 304 instead of sending a body. */
+const CONDITIONAL_REQUEST = new Set(['if-none-match', 'if-modified-since'])
+
 /** Response headers never relayed back to the client. */
 const HOP_BY_HOP_RESPONSE = new Set(['connection', 'keep-alive', 'transfer-encoding', 'set-cookie', 'content-encoding', 'content-security-policy', 'referrer-policy', 'x-powered-by'])
 
@@ -174,7 +177,9 @@ export class UpstreamServer {
   async forwardJson<T = unknown>(req: IncomingMessage, path: string, opts: { body?: unknown } = {}): Promise<JsonResult<T>> {
     const headers: Record<string, string> = { authorization: this.authHeader }
     for (const [name, value] of Object.entries(req.headers)) {
-      if (HOP_BY_HOP_REQUEST.has(name) || value === undefined) continue
+      // The caller may rewrite the body, so a conditional request must not
+      // turn into a 304 that makes the client reuse a stale cached copy.
+      if (HOP_BY_HOP_REQUEST.has(name) || CONDITIONAL_REQUEST.has(name) || value === undefined) continue
       headers[name] = Array.isArray(value) ? value.join(', ') : value
     }
     const method = (req.method ?? 'GET') as Dispatcher.HttpMethod
@@ -203,11 +208,14 @@ export class UpstreamServer {
 export function sendResult(res: ServerResponse, result: JsonResult, bodyOverride?: unknown) {
   for (const [name, value] of Object.entries(result.headers)) {
     if (HOP_BY_HOP_RESPONSE.has(name) || name === 'content-length' || value === undefined) continue
+    // Upstream's validators describe upstream's body, not the one sent here.
+    if (name === 'etag' || name === 'last-modified') continue
     res.setHeader(name, value)
   }
   res.statusCode = result.status
   if (bodyOverride !== undefined) {
     res.setHeader('content-type', 'application/json; charset=utf-8')
+    res.setHeader('cache-control', 'no-store')
     res.end(JSON.stringify(bodyOverride))
   } else {
     res.end(result.text)
