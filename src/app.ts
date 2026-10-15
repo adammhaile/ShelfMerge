@@ -6,6 +6,7 @@ import type { Context } from './context.js'
 import { authRoutes } from './auth/routes.js'
 import { authMiddleware } from './auth/middleware.js'
 import { meRoutes } from './routes/me.js'
+import { userRoutes } from './routes/users.js'
 import { libraryRoutes } from './routes/libraries.js'
 import { mergedRoutes } from './routes/merged.js'
 import { collectionRoutes } from './routes/collections.js'
@@ -97,6 +98,7 @@ export function createApp(ctx: Context) {
   const api = express.Router()
   api.use(authMiddleware(ctx))
   api.use(meRoutes(ctx))
+  api.use(userRoutes(ctx))
   api.use(mergedRoutes(ctx))
   api.use(libraryRoutes(ctx))
   api.use(collectionRoutes(ctx))

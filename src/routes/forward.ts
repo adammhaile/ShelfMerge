@@ -6,14 +6,25 @@ import { log } from '../logger.js'
 /** Routes whose responses are byte streams: relay without buffering. */
 const STREAM_PATHS = [/^\/items\/[^/]+\/(cover|file|ebook|download)/, /^\/authors\/[^/]+\/image/, /^\/libraries\/[^/]+\/download/, /^\/items\/[^/]+\/file\/[^/]+\/download/, /^\/backups\//]
 
-/** Routes answered locally because they are about the proxy itself, not content. */
+/**
+ * Routes answered locally because they are about the proxy itself, not
+ * content: enough for the stock settings pages to render empty rather than
+ * error for admins.
+ */
 const STUBS: Record<string, unknown> = {
   '/users/online': { usersOnline: [], openSessions: [] },
   '/tasks': { tasks: [] },
   '/api-keys': { apiKeys: [] },
   '/notifications': { data: { events: [] }, settings: { id: 'notification-settings', appriseType: 'api', appriseApiUrl: null, notifications: [], maxFailedAttempts: 5, maxNotificationQueue: 20, notificationDelay: 1000 } },
-  '/auth-settings': { authActiveAuthMethods: ['local'] },
-  '/logger-data': { currentDailyLogs: [] }
+  '/auth-settings': { authActiveAuthMethods: ['local'], authLoginCustomMessage: '', authOpenIDIssuerURL: null },
+  '/logger-data': { currentDailyLogs: [] },
+  '/backups': { backups: [], backupLocation: '', backupSchedule: false, backupsToKeep: 2, maxBackupSize: 1 },
+  '/sessions': { total: 0, numPages: 0, page: 0, itemsPerPage: 10, sessions: [], userFilter: null },
+  '/sessions/open': { sessions: [] },
+  '/feeds': { feeds: [] },
+  '/custom-metadata-providers': { providers: [] },
+  '/emails/settings': { settings: { id: 'email-settings', host: null, port: 465, secure: true, rejectUnauthorized: true, user: null, pass: null, testAddress: null, fromAddress: null, ereaderDevices: [] } },
+  '/stats/server': { totalListeningTime: 0, totalListeningSessions: 0, libraryStats: [] }
 }
 
 /**

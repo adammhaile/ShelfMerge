@@ -30,11 +30,16 @@ curl -fsS "${auth[@]}" "$SM/api/libraries/$M/items?limit=3&sort=media.duration&d
 curl -fsS "${auth[@]}" "$SM/api/libraries/$M/items?limit=3&sort=addedAt&desc=1" | j '"newest:", [i["media"]["metadata"]["title"][:25] for i in d["results"]]'
 curl -fsS "${auth[@]}" "$SM/api/libraries/$M/items?limit=3&sort=media.metadata.authorNameLF" | j '"by author LF:", [i["media"]["metadata"]["authorNameLF"][:25] for i in d["results"]]'
 
-step "title sort matches upstream (home library, first 10 after removing dev titles)"
-H="$(echo "$LIBS" | j '[l["id"] for l in d["libraries"] if l["name"].startswith("Home")][0]')"
+step "title sort matches upstream (a real library when one is configured, else Dev A)"
+H="$(echo "$LIBS" | j '([l["id"] for l in d["libraries"] if l["name"].startswith("Home")] or [l["id"] for l in d["libraries"] if l["name"].startswith("Dev A")])[0]')"
 UP="$(curl -fsS "${auth[@]}" "$SM/api/libraries/$H/items?limit=10&sort=media.metadata.title&minified=1" | j '[i["media"]["metadata"]["title"] for i in d["results"]]')"
-MINE="$(echo "$ALL" | j '[i["media"]["metadata"]["title"] for i in d["results"] if i["media"]["metadata"]["title"] not in ("Short Stories","Long Walk","The Sequel","Other Book","Another One","Another Two")][:10]')"
-[ "$UP" = "$MINE" ] && echo "identical order" || { echo "upstream: $UP"; echo "merged:   $MINE"; }
+MINE="$(curl -fsS "${auth[@]}" "$SM/api/libraries/$M/items?limit=0&sort=media.metadata.title&minified=1" | j '[i["media"]["metadata"]["title"] for i in d["results"]]')"
+python3 - "$UP" "$MINE" <<'PY'
+import sys, ast
+up, mine = ast.literal_eval(sys.argv[1]), ast.literal_eval(sys.argv[2])
+sub = [t for t in mine if t in up][:len(up)]
+print("identical order" if sub == up else f"ORDER DIFFERS\nupstream: {up}\nmerged:   {sub}")
+PY
 
 step "filters"
 AUTHOR_ID="$(curl -fsS "${auth[@]}" "$SM/api/libraries/$M/filterdata" | j '[a["id"] for a in d["authors"] if a["name"]=="Jane Doe"][0]')"

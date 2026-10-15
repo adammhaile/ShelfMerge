@@ -10,7 +10,7 @@ export interface OldUserJSON {
   id: string
   username: string
   email: string | null
-  type: 'user'
+  type: 'user' | 'admin'
   token: string
   isOldToken?: boolean
   mediaProgress: unknown[]
@@ -47,6 +47,13 @@ export const USER_PERMISSIONS = {
   selectedTagsNotAccessible: false
 }
 
+const isBcrypt = (s: string | null | undefined) => !!s && /^\$2[aby]\$\d\d\$/.test(s)
+
+/**
+ * ShelfMerge users. Those listed in the config may log in and carry their
+ * allow-lists and own-account keys there; users created by an admin from
+ * the web UI live only in the database and see every library.
+ */
 export class UserStore {
   private readonly configs = new Map<string, UserConfig>()
 
@@ -56,9 +63,17 @@ export class UserStore {
     private readonly progress: ProgressStore
   ) {}
 
-  /** The config entry for a user (library allow-list lives there). */
+  /** Effective config for a user: the YAML entry, or defaults for an admin-created user. */
   config(user: Pick<UserRow, 'username'>): UserConfig | undefined {
-    return this.configs.get(user.username)
+    const c = this.configs.get(user.username)
+    if (c) return c
+    const row = this.byUsername(user.username)
+    if (row?.source === 'admin') return { username: row.username, password: null, admin: false, libraries: null, accounts: {} }
+    return undefined
+  }
+
+  isAdmin(user: Pick<UserRow, 'username'>): boolean {
+    return !!this.configs.get(user.username)?.admin
   }
 
   /**
@@ -73,33 +88,47 @@ export class UserStore {
     for (const u of cfg.users) {
       this.configs.set(u.username, u)
       const existing = this.byUsername(u.username)
-      const isHash = !!u.password && /^\$2[aby]\$\d\d\$/.test(u.password)
+      const hash = isBcrypt(u.password)
       if (!existing) {
         if (!u.password) {
-          log.warn(`[users] "${u.username}" has no password yet; set one with: npm run user -- passwd ${u.username}`)
-          this.db.prepare('INSERT INTO users (id, username, passwordHash, createdAt) VALUES (?, ?, ?, ?)').run(uuidv4(), u.username, '', Date.now())
+          log.warn(`[users] "${u.username}" has no password yet; set one from the Users page or with: npm run user -- passwd ${u.username}`)
+          this.insert(u.username, '', 'config')
           continue
         }
-        this.db.prepare('INSERT INTO users (id, username, passwordHash, createdAt) VALUES (?, ?, ?, ?)').run(uuidv4(), u.username, isHash ? u.password! : bcrypt.hashSync(u.password, 10), Date.now())
+        this.insert(u.username, hash ? u.password! : bcrypt.hashSync(u.password, 10), 'config')
         log.info(`[users] created user "${u.username}"`)
-      } else if (isHash && existing.passwordHash !== u.password) {
-        this.db.prepare('UPDATE users SET passwordHash = ? WHERE id = ?').run(u.password, existing.id)
-        this.tokens.invalidateAllForUser(existing.id)
-        log.info(`[users] password hash for "${u.username}" set from config, sessions invalidated`)
-      } else if (!existing.passwordHash && u.password) {
-        this.setPassword(existing.id, u.password)
-        log.info(`[users] initial password set for "${u.username}"`)
+      } else {
+        if (existing.source !== 'config') this.db.prepare("UPDATE users SET source = 'config' WHERE id = ?").run(existing.id)
+        if (hash && existing.passwordHash !== u.password) {
+          this.db.prepare('UPDATE users SET passwordHash = ? WHERE id = ?').run(u.password, existing.id)
+          this.tokens.invalidateAllForUser(existing.id)
+          log.info(`[users] password hash for "${u.username}" set from config, sessions invalidated`)
+        } else if (!existing.passwordHash && u.password) {
+          this.setPassword(existing.id, u.password)
+          log.info(`[users] initial password set for "${u.username}"`)
+        }
       }
     }
   }
 
-  /**
-   * A user removed from the config keeps their rows (progress, history) but
-   * can no longer log in or use existing tokens.
-   */
+  private insert(username: string, passwordHash: string, source: UserRow['source']): UserRow {
+    const row = { id: uuidv4(), username, passwordHash, createdAt: Date.now(), source }
+    this.db.prepare('INSERT INTO users (id, username, passwordHash, createdAt, source) VALUES (@id, @username, @passwordHash, @createdAt, @source)').run(row)
+    return this.byId(row.id)!
+  }
+
+  /** Users who may log in: listed in the config, or created by an admin. */
+  private allowed(user: UserRow | undefined): UserRow | undefined {
+    if (!user) return undefined
+    return this.configs.has(user.username) || user.source === 'admin' ? user : undefined
+  }
+
+  all(): UserRow[] {
+    return (this.db.prepare('SELECT * FROM users ORDER BY username').all() as UserRow[]).filter((u) => this.allowed(u))
+  }
+
   byId(id: string): UserRow | undefined {
-    const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined
-    return user && this.configs.has(user.username) ? user : undefined
+    return this.allowed(this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined)
   }
 
   byUsername(username: string): UserRow | undefined {
@@ -107,14 +136,38 @@ export class UserStore {
   }
 
   authenticate(username: string, password: string): UserRow | null {
-    if (!this.configs.has(username)) return null
-    const user = this.byUsername(username)
-    if (!user || !user.passwordHash || !bcrypt.compareSync(password, user.passwordHash)) return null
+    const user = this.allowed(this.byUsername(username))
+    if (!user || !user.isActive || !user.passwordHash || !bcrypt.compareSync(password, user.passwordHash)) return null
     return user
+  }
+
+  /** Admin-created user; sees every library, no own-account keys. */
+  create(username: string, password: string): UserRow {
+    if (this.byUsername(username)) throw new Error('Username already taken')
+    const row = this.insert(username, bcrypt.hashSync(password, 10), 'admin')
+    log.info(`[users] admin created user "${username}"`)
+    return row
   }
 
   setPassword(userId: string, password: string) {
     this.db.prepare('UPDATE users SET passwordHash = ? WHERE id = ?').run(bcrypt.hashSync(password, 10), userId)
+  }
+
+  setActive(userId: string, active: boolean) {
+    this.db.prepare('UPDATE users SET isActive = ? WHERE id = ?').run(active ? 1 : 0, userId)
+    if (!active) this.tokens.invalidateAllForUser(userId)
+  }
+
+  rename(userId: string, username: string) {
+    this.db.prepare('UPDATE users SET username = ? WHERE id = ?').run(username, userId)
+  }
+
+  /** Remove an admin-created user and everything they own. */
+  remove(userId: string) {
+    this.db.transaction(() => {
+      for (const t of ['auth_sessions', 'media_progress', 'bookmarks', 'user_extra', 'playback_sessions', 'listening_sessions', 'playlists']) this.db.prepare(`DELETE FROM ${t} WHERE userId = ?`).run(userId)
+      this.db.prepare('DELETE FROM users WHERE id = ?').run(userId)
+    })()
   }
 
   touch(userId: string) {
@@ -138,12 +191,12 @@ export class UserStore {
       id: user.id,
       username: user.username,
       email: null,
-      type: 'user',
+      type: this.isAdmin(user) ? 'admin' : 'user',
       token: this.tokens.legacyToken(user),
       mediaProgress: this.progress.allForUser(user.id),
       seriesHideFromContinueListening: this.seriesHidden(user.id),
       bookmarks: this.progress.bookmarksForUser(user.id),
-      isActive: true,
+      isActive: !!user.isActive,
       isLocked: false,
       lastSeen: user.lastSeen,
       createdAt: user.createdAt,

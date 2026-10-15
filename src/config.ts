@@ -18,6 +18,8 @@ export interface UserConfig {
    * with `npm run user -- passwd <name>`. May be omitted for existing users.
    */
   password: string | null
+  /** Sees the stock Users settings page: can create users, reset passwords, deactivate. */
+  admin: boolean
   /**
    * Libraries this user may see, as `serverKey:*`, `serverKey:Library Name`
    * or `serverKey:<libraryId>`. Omitted means every library on every server.
@@ -70,7 +72,7 @@ interface RawConfig {
   dataDir?: string
   clientDir?: string
   servers?: Record<string, { url: string; apiKey: string; label?: string }>
-  users?: Record<string, { password?: string; libraries?: string[]; accounts?: Record<string, string | { apiKey: string }> } | null>
+  users?: Record<string, { password?: string; admin?: boolean; libraries?: string[]; accounts?: Record<string, string | { apiKey: string }> } | null>
   merged?: Array<{ name?: string; mediaType?: string; sources?: string[]; collapseEditions?: boolean; preferServers?: string[]; keepSeparate?: string[] }>
   prefixLibraryNames?: boolean
   accessTokenExpiry?: number
@@ -117,7 +119,7 @@ export function loadConfig(file = process.env.SHELFMERGE_CONFIG ?? 'config/shelf
       if (!apiKey) throw new Error(`Config: user "${username}" account for "${key}" needs an apiKey`)
       accounts[key] = String(apiKey)
     }
-    return { username, password: u.password === undefined || u.password === null ? null : String(u.password), libraries, accounts }
+    return { username, password: u.password === undefined || u.password === null ? null : String(u.password), admin: !!u.admin, libraries, accounts }
   })
   if (!users.length) throw new Error('Config: at least one user is required')
 

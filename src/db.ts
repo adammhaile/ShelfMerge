@@ -10,6 +10,9 @@ export interface UserRow {
   passwordHash: string
   createdAt: number
   lastSeen: number | null
+  isActive: number
+  /** 'config' for users listed in the YAML, 'admin' for users created from the web UI. */
+  source: 'config' | 'admin'
 }
 
 export interface AuthSessionRow {
@@ -266,6 +269,8 @@ CREATE TABLE IF NOT EXISTS kv (
 
 /** Columns added after the first release; applied to existing databases. */
 const migrations: Array<{ table: string; column: string; ddl: string }> = [
+  { table: 'users', column: 'isActive', ddl: 'INTEGER NOT NULL DEFAULT 1' },
+  { table: 'users', column: 'source', ddl: "TEXT NOT NULL DEFAULT 'config'" },
   { table: 'id_map', column: 'libraryId', ddl: 'TEXT' },
   { table: 'playback_sessions', column: 'libraryId', ddl: "TEXT NOT NULL DEFAULT ''" },
   { table: 'playback_sessions', column: 'snapshot', ddl: "TEXT NOT NULL DEFAULT '{}'" }
