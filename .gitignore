@@ -6,3 +6,4 @@ data/
 config/shelfmerge.yaml
 test/fixtures/generated/
 client-dist/
+deploy-live/
