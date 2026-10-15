@@ -108,12 +108,12 @@ export function itemRoutes(ctx: Context): Router {
    */
   const editionsBlock = (set: EditionSet, itemId: string): string => {
     const label = (key: string) => ctx.registry.server(key)?.label ?? key
+    const describe = (m: EditionSet['members'][number]) => [label(m.serverKey), m.narratorName ? `narrated by ${m.narratorName}` : null, formatDuration(m.duration)].filter(Boolean).join(', ')
+    const me = set.members.find((m) => m.id === itemId)
     const others = set.members.filter((m) => m.id !== itemId)
-    const lines = others.map((m) => {
-      const bits = [label(m.serverKey), m.narratorName ? `narrated by ${m.narratorName}` : null, formatDuration(m.duration)].filter(Boolean).join(', ')
-      return `<li><a href="${BASE_PATH}/item/${m.id}">${bits}</a>${m.id === set.preferred ? ' (shown in library)' : ''}</li>`
-    })
-    return `<p><strong>Other editions</strong></p><ul>${lines.join('')}</ul>`
+    const lines = others.map((m) => `<li><a href="${BASE_PATH}/item/${m.id}">${describe(m)}</a>${m.id === set.preferred ? ' (shown in library)' : ''}</li>`)
+    const current = me ? `<p><strong>This edition:</strong> ${describe(me)}${me.id === set.preferred ? ' (shown in library)' : ''}</p>` : ''
+    return `${current}<p><strong>Other editions</strong></p><ul>${lines.join('')}</ul>`
   }
 
   // Item detail: inject our progress when the client asked for it.

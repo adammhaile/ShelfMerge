@@ -11,7 +11,13 @@ export interface ServerConfig {
 
 export interface UserConfig {
   username: string
-  password: string
+  /**
+   * Initial password (plain text or a bcrypt hash), used only when the user
+   * does not exist yet, or to force a change when it is a hash. Afterwards
+   * the password lives in the database and is changed from the web UI or
+   * with `npm run user -- passwd <name>`. May be omitted for existing users.
+   */
+  password: string | null
   /**
    * Libraries this user may see, as `serverKey:*`, `serverKey:Library Name`
    * or `serverKey:<libraryId>`. Omitted means every library on every server.
@@ -64,7 +70,7 @@ interface RawConfig {
   dataDir?: string
   clientDir?: string
   servers?: Record<string, { url: string; apiKey: string; label?: string }>
-  users?: Record<string, { password: string; libraries?: string[]; accounts?: Record<string, string | { apiKey: string }> }>
+  users?: Record<string, { password?: string; libraries?: string[]; accounts?: Record<string, string | { apiKey: string }> } | null>
   merged?: Array<{ name?: string; mediaType?: string; sources?: string[]; collapseEditions?: boolean; preferServers?: string[]; keepSeparate?: string[] }>
   prefixLibraryNames?: boolean
   accessTokenExpiry?: number
@@ -97,8 +103,8 @@ export function loadConfig(file = process.env.SHELFMERGE_CONFIG ?? 'config/shelf
   })
   if (!servers.length) throw new Error('Config: at least one server is required')
 
-  const users = Object.entries(raw.users ?? {}).map(([username, u]) => {
-    if (!u?.password) throw new Error(`Config: user "${username}" needs a password`)
+  const users = Object.entries(raw.users ?? {}).map(([username, raw]) => {
+    const u = raw ?? {}
     const libraries = u.libraries ? u.libraries.map(String) : null
     for (const rule of libraries ?? []) {
       const key = rule.split(':')[0]
@@ -111,7 +117,7 @@ export function loadConfig(file = process.env.SHELFMERGE_CONFIG ?? 'config/shelf
       if (!apiKey) throw new Error(`Config: user "${username}" account for "${key}" needs an apiKey`)
       accounts[key] = String(apiKey)
     }
-    return { username, password: String(u.password), libraries, accounts }
+    return { username, password: u.password === undefined || u.password === null ? null : String(u.password), libraries, accounts }
   })
   if (!users.length) throw new Error('Config: at least one user is required')
 

@@ -46,12 +46,16 @@ merged:
 
 # People who log into ShelfMerge. Progress and bookmarks are kept per
 # ShelfMerge user; upstream only ever sees the service account.
+# `password` is only the INITIAL password: it creates the user, after which
+# the password lives hashed in the database and is changed from the web UI
+# (account page) or with `npm run user -- passwd <name>`. It may be a bcrypt
+# hash (`npm run user -- hash`) and may be omitted for existing users.
 # `libraries` limits what a user sees: "<serverKey>:*", "<serverKey>:<library name>",
 # "<serverKey>:<library id>", or "merged:*" / "merged:<name>" for merged
 # libraries. Omit it for access to everything.
 users:
   adam:
-    password: ${ADAM_PASSWORD}
+    password: ${ADAM_PASSWORD:-change-me-on-first-login}
     # Optional: adam's own API keys. On these servers requests run as adam
     # (own permissions, own history), and progress flows both ways.
     accounts:

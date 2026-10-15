@@ -61,19 +61,34 @@ export class UserStore {
     return this.configs.get(user.username)
   }
 
-  /** Create or update local users from config. Passwords are bcrypt-hashed at rest. */
+  /**
+   * Create local users from config. The config password only seeds a new
+   * user (plain text or bcrypt hash); afterwards the database copy wins, so
+   * passwords changed in the web UI or with the CLI stick. A bcrypt hash in
+   * the config that differs from the stored one is applied, which is the
+   * declarative way to reset a password.
+   */
   syncFromConfig(cfg: Config) {
     this.configs.clear()
     for (const u of cfg.users) {
       this.configs.set(u.username, u)
       const existing = this.byUsername(u.username)
+      const isHash = !!u.password && /^\$2[aby]\$\d\d\$/.test(u.password)
       if (!existing) {
-        this.db.prepare('INSERT INTO users (id, username, passwordHash, createdAt) VALUES (?, ?, ?, ?)').run(uuidv4(), u.username, bcrypt.hashSync(u.password, 10), Date.now())
+        if (!u.password) {
+          log.warn(`[users] "${u.username}" has no password yet; set one with: npm run user -- passwd ${u.username}`)
+          this.db.prepare('INSERT INTO users (id, username, passwordHash, createdAt) VALUES (?, ?, ?, ?)').run(uuidv4(), u.username, '', Date.now())
+          continue
+        }
+        this.db.prepare('INSERT INTO users (id, username, passwordHash, createdAt) VALUES (?, ?, ?, ?)').run(uuidv4(), u.username, isHash ? u.password! : bcrypt.hashSync(u.password, 10), Date.now())
         log.info(`[users] created user "${u.username}"`)
-      } else if (!bcrypt.compareSync(u.password, existing.passwordHash)) {
-        this.db.prepare('UPDATE users SET passwordHash = ? WHERE id = ?').run(bcrypt.hashSync(u.password, 10), existing.id)
+      } else if (isHash && existing.passwordHash !== u.password) {
+        this.db.prepare('UPDATE users SET passwordHash = ? WHERE id = ?').run(u.password, existing.id)
         this.tokens.invalidateAllForUser(existing.id)
-        log.info(`[users] password changed for "${u.username}", sessions invalidated`)
+        log.info(`[users] password hash for "${u.username}" set from config, sessions invalidated`)
+      } else if (!existing.passwordHash && u.password) {
+        this.setPassword(existing.id, u.password)
+        log.info(`[users] initial password set for "${u.username}"`)
       }
     }
   }
@@ -94,7 +109,7 @@ export class UserStore {
   authenticate(username: string, password: string): UserRow | null {
     if (!this.configs.has(username)) return null
     const user = this.byUsername(username)
-    if (!user || !bcrypt.compareSync(password, user.passwordHash)) return null
+    if (!user || !user.passwordHash || !bcrypt.compareSync(password, user.passwordHash)) return null
     return user
   }
 

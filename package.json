@@ -15,7 +15,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "rotate-secret": "tsx src/tools/rotate-secret.ts"
+    "rotate-secret": "tsx src/tools/rotate-secret.ts",
+    "user": "tsx src/tools/user.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

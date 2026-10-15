@@ -62,6 +62,8 @@ node scripts/smoke-live.mjs   # an upstream edit reaches the index and is relaye
 
 See [config/shelfmerge.example.yaml](config/shelfmerge.example.yaml).
 
+**Users and passwords.** Users are listed under `users:`; that list is also who may log in. The `password` there is only the initial one: it creates the user, and from then on the password is stored hashed in the database, so there is no need to keep it in the file. Users change their own password on the web client's account page; an admin resets one with `npm run user -- passwd <name>` (`docker exec -it shelfmerge node dist/tools/user.js passwd <name>`). `npm run user -- hash` prints a bcrypt hash to use as `password:` for a fully declarative setup, and `npm run user -- list` shows who exists.
+
 Login and token refresh are rate limited per IP: 20 failed attempts per 10 minutes, then `429` (`SHELFMERGE_AUTH_RATE_LIMIT` sets the count, `0` disables; `SHELFMERGE_AUTH_RATE_LIMIT_WINDOW` the window in ms). Successful requests never count.
 
 To sign everyone out and replace the JWT signing secret: `npm run rotate-secret` (dev) or `docker exec shelfmerge node dist/tools/rotate-secret.js`, then restart. The file is re-read when it changes (polled every 2 s): users and servers can be added, removed or re-keyed live; `port` and `dataDir` need a restart. A user removed from the config keeps their progress but can no longer log in. Environment overrides: `PORT`, `SHELFMERGE_CONFIG`, `SHELFMERGE_CLIENT_DIR`, `SHELFMERGE_TOKEN_SECRET`, `ROUTER_BASE_PATH`, `LOG_LEVEL` (`debug`, `info`, `warn`, `error`).
