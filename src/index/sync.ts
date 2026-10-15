@@ -35,8 +35,13 @@ export class Indexer {
     private readonly store: IndexStore,
     private readonly registry: Registry,
     private readonly catalog: Catalog,
-    private readonly prefixes: () => string[]
+    private readonly prefixes: () => string[],
+    /** Whether a server delivers live socket events; without them its index goes stale sooner. */
+    private readonly hasLiveEvents: (serverKey: string) => boolean = () => true
   ) {}
+
+  /** Called after a library was (re)pulled, so query caches can be dropped. */
+  onLibraryPulled: ((libraryId: string) => void) | null = null
 
   /** Library ids the merged libraries draw from. */
   sourceLibraryIds(): Array<{ libraryId: string; serverKey: string }> {
@@ -45,9 +50,13 @@ export class Indexer {
     return [...out].map(([libraryId, serverKey]) => ({ libraryId, serverKey }))
   }
 
-  async start(reconcileMs = 6 * 60 * 60 * 1000, staleMs = 60 * 60 * 1000) {
+  /**
+   * Full pull at startup when stale, then periodically: every `reconcileMs`
+   * for servers with live events, every `noEventsMs` for servers without.
+   */
+  async start(reconcileMs = 6 * 60 * 60 * 1000, staleMs = 60 * 60 * 1000, noEventsMs = 30 * 60 * 1000) {
     await this.reconcileAll(staleMs)
-    this.timer = setInterval(() => this.reconcileAll(0).catch(() => {}), reconcileMs)
+    this.timer = setInterval(() => this.reconcileAll(reconcileMs, noEventsMs).catch(() => {}), Math.min(reconcileMs, noEventsMs))
     this.timer.unref()
   }
 
@@ -55,12 +64,13 @@ export class Indexer {
     if (this.timer) clearInterval(this.timer)
   }
 
-  /** Pull every source library that has not been pulled within `staleMs`. */
-  async reconcileAll(staleMs: number) {
+  /** Pull every source library not pulled within `staleMs` (`noEventsMs` for servers without live events). */
+  async reconcileAll(staleMs: number, noEventsMs = staleMs) {
     const sources = this.sourceLibraryIds()
     await Promise.all(
       sources.map(async ({ libraryId, serverKey }) => {
-        if (Date.now() - this.store.syncedAt(libraryId) < staleMs) return
+        const limit = this.hasLiveEvents(serverKey) ? staleMs : Math.min(staleMs, noEventsMs)
+        if (Date.now() - this.store.syncedAt(libraryId) < limit) return
         await this.pullLibrary(serverKey, libraryId)
       })
     )
@@ -112,6 +122,7 @@ export class Indexer {
       for (const a of authors.authors ?? []) this.store.putAuthor({ id: a.id, serverKey, libraryId, name: a.name, lastFirst: nameLastFirst(a.name), description: a.description, imagePath: a.imagePath, asin: a.asin, addedAt: a.addedAt, updatedAt: a.updatedAt })
 
       this.store.markSynced(libraryId, serverKey, seen.size)
+      this.onLibraryPulled?.(libraryId)
       log.info(`[index] ${serverKey}/${libraryId}: ${seen.size} of ${total} items indexed in ${((Date.now() - started) / 1000).toFixed(1)}s`)
     } catch (err) {
       log.warn(`[index] pull of ${serverKey}/${libraryId} failed:`, (err as Error).message)

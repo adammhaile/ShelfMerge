@@ -56,8 +56,9 @@ async function main() {
   const catalog = new Catalog(registry, cfg)
   const indexStore = new IndexStore(db, () => catalog.sortingPrefixes)
   const indexQuery = new IndexQuery(indexStore, progress, () => catalog.sortingPrefixes, () => catalog.sortingIgnorePrefix)
-  const indexer = new Indexer(indexStore, registry, catalog, () => catalog.sortingPrefixes)
   const socket = new SocketHub(tokens, users, registry)
+  const indexer = new Indexer(indexStore, registry, catalog, () => catalog.sortingPrefixes, (key) => socket.isLive(key))
+  indexer.onLibraryPulled = (libraryId) => indexQuery.invalidate(libraryId)
 
   socket.onUpstreamEvent = (serverKey, event, payload) => {
     // Library events carry upstream names; present them like /api/libraries does,

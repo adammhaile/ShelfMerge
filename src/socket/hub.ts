@@ -29,6 +29,12 @@ export class SocketHub {
   private readonly servers: Server[] = []
   private readonly clients = new Map<string, Client>()
   private readonly upstreams: ClientSocket[] = []
+  /** Servers whose socket is connected and authenticated; others get no live events. */
+  private readonly live = new Set<string>()
+
+  isLive(serverKey: string): boolean {
+    return this.live.has(serverKey)
+  }
   /**
    * Optional hook to rewrite an upstream event's payload before it is
    * relayed. May return several payloads; each is emitted as its own event
@@ -87,6 +93,7 @@ export class SocketHub {
   reconnectUpstreams() {
     for (const s of this.upstreams) s.close()
     this.upstreams.length = 0
+    this.live.clear()
     this.connectUpstreams()
   }
 
@@ -97,9 +104,18 @@ export class SocketHub {
         log.info(`[socket:${server.key}] connected, authenticating`)
         s.emit('auth', server.authHeader.slice('Bearer '.length))
       })
-      s.on('init', () => log.info(`[socket:${server.key}] upstream accepted service account`))
-      s.on('auth_failed', (d: unknown) => log.error(`[socket:${server.key}] upstream auth failed:`, d))
-      s.on('disconnect', (reason) => log.warn(`[socket:${server.key}] disconnected: ${reason}`))
+      s.on('init', () => {
+        this.live.add(server.key)
+        log.info(`[socket:${server.key}] upstream accepted service account`)
+      })
+      s.on('auth_failed', (d: unknown) => {
+        this.live.delete(server.key)
+        log.warn(`[socket:${server.key}] upstream rejected the API key for the socket (${(d as { message?: string })?.message ?? 'unknown'}); older Audiobookshelf versions only accept user tokens there. No live events from this server: its libraries are re-pulled every 30 minutes instead.`)
+      })
+      s.on('disconnect', (reason) => {
+        this.live.delete(server.key)
+        log.warn(`[socket:${server.key}] disconnected: ${reason}`)
+      })
       s.on('connect_error', (err) => log.debug(`[socket:${server.key}] connect error: ${err.message}`))
       s.onAny((event: string, ...args: unknown[]) => {
         if (DROP_UPSTREAM.test(event)) return
