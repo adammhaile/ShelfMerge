@@ -17,6 +17,7 @@ ARG ABS_VERSION
 ENV NODE_ENV=production \
     ABS_VERSION=${ABS_VERSION} \
     SHELFMERGE_CONFIG=/config/shelfmerge.yaml \
+    SHELFMERGE_DATA_DIR=/data \
     SHELFMERGE_CLIENT_DIR=/app/client-dist \
     PORT=3333
 WORKDIR /app
