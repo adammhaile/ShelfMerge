@@ -77,7 +77,7 @@ On each droplet (Ubuntu, Docker installed, a DNS name pointing at it, ports 80 a
 ```bash
 mkdir -p ~/shelfmerge && cd ~/shelfmerge
 curl -O https://raw.githubusercontent.com/adammhaile/ShelfMerge/main/docker-compose.yml
-mkdir -p deploy && curl -o deploy/Caddyfile https://raw.githubusercontent.com/adammhaile/ShelfMerge/main/deploy/Caddyfile
+mkdir -p deploy && cd deploy && curl -O https://raw.githubusercontent.com/adammhaile/ShelfMerge/main/deploy/Caddyfile && curl -O https://raw.githubusercontent.com/adammhaile/ShelfMerge/main/deploy/docker-compose.caddy.yml && cd ..
 mkdir -p config     # stays empty; the config comes from the URL
 ```
 
@@ -102,13 +102,13 @@ SHELFMERGE_DOMAIN=shelf-eu.example.com      # shelf-us.example.com on the other 
 Log in to the registry once (the image is private unless you make the package public): `docker login ghcr.io -u <you>` with a token that has `read:packages`. Then:
 
 ```bash
-docker compose --profile caddy up -d
+docker compose -f docker-compose.yml -f deploy/docker-compose.caddy.yml up -d
 docker compose logs -f shelfmerge     # expect "[config] polling https://..." and "[index] ... indexed"
 ```
 
 Repeat on the second droplet with the same `.env` apart from `SHELFMERGE_DOMAIN`.
 
-Without Caddy (you already have a reverse proxy): `docker compose up -d` and proxy to port 3333; see the README's reverse-proxy section.
+With your own reverse proxy instead of Caddy: plain `docker compose up -d` and proxy to port 3333; see the README's reverse-proxy section.
 
 ## 4. Verify
 

@@ -1,0 +1,27 @@
+# Optional: Caddy in front of ShelfMerge with automatic HTTPS, for hosts with
+# no reverse proxy of their own. Set SHELFMERGE_DOMAIN in .env, then:
+#
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.caddy.yml up -d
+services:
+  shelfmerge:
+    ports: !override []   # only Caddy is exposed
+
+  caddy:
+    image: caddy:2
+    container_name: shelfmerge-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - SHELFMERGE_DOMAIN=${SHELFMERGE_DOMAIN:?set SHELFMERGE_DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - shelfmerge
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:

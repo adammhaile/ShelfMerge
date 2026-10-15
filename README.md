@@ -31,7 +31,7 @@ Open <http://localhost:3333>, log in as the admin user, change the password on t
 
 `.env` is optional: if you prefer keeping keys out of the YAML, reference them as `${VAR}` and put the values there (`.env.example`).
 
-For HTTPS on the open internet, set `SHELFMERGE_DOMAIN` in `.env` and run `docker compose --profile caddy up -d`; Caddy terminates TLS with an automatic certificate and proxies to ShelfMerge. If you already run a reverse proxy, skip the profile and point it at port 3333 (see below).
+For HTTPS, put your reverse proxy in front of port 3333 (see below). If you have none, `deploy/docker-compose.caddy.yml` is an optional overlay that adds Caddy with an automatic certificate: set `SHELFMERGE_DOMAIN` in `.env` and run `docker compose -f docker-compose.yml -f deploy/docker-compose.caddy.yml up -d`.
 
 **Backups**: everything ShelfMerge owns (users, progress, history, playlists, the index, the token secret) is in the `/data` volume, a single SQLite file; copy it while the container is stopped, or `sqlite3 /data/shelfmerge.db ".backup /backup/shelfmerge.db"` while running. The config and `.env` are the rest. The index is a cache and rebuilds itself if lost.
 
