@@ -4,7 +4,6 @@ import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client'
 import type { TokenManager } from '../auth/tokens.js'
 import type { UserStore } from '../users.js'
 import type { Registry } from '../upstream/registry.js'
-import { TokenManager as TM } from '../auth/tokens.js'
 import { log } from '../logger.js'
 
 interface Client {
@@ -69,13 +68,12 @@ export class SocketHub {
   }
 
   private authenticate(socket: Socket, token: unknown) {
-    const payload = typeof token === 'string' ? this.tokens.verify(token) : null
-    if (!TM.isAccess(payload)) {
+    const userId = typeof token === 'string' ? this.tokens.userIdForToken(token) : null
+    const user = userId ? this.users.byId(userId) : undefined
+    if (!user || !user.isActive) {
       log.warn(`[socket] auth failed for ${socket.id}`)
       return socket.emit('auth_failed', { message: 'Invalid token' })
     }
-    const user = this.users.byId(payload.userId)
-    if (!user) return socket.emit('auth_failed', { message: 'Invalid token' })
     const client = this.clients.get(socket.id)
     if (!client) return
     client.userId = user.id

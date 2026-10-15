@@ -59,3 +59,23 @@ describe('TokenManager', () => {
     expect(t2.verify(token)?.userId).toBe('u1')
   })
 })
+
+describe('API key tokens', () => {
+  it('resolve to their user while active and unexpired, and never as refresh tokens', () => {
+    const tm = new TokenManager(dbWithUser(), cfg)
+    const keys = new Map<string, { userId: string; isActive: boolean; expiresAt: number | null }>()
+    tm.apiKeyResolver = (id) => keys.get(id)
+    keys.set('k1', { userId: 'u1', isActive: true, expiresAt: null })
+    const token = tm.apiKeyToken('k1', 'dashboard')
+    expect(tm.userIdForToken(token)).toBe('u1')
+    keys.set('k1', { userId: 'u1', isActive: false, expiresAt: null })
+    expect(tm.userIdForToken(token)).toBeNull()
+    keys.set('k1', { userId: 'u1', isActive: true, expiresAt: Date.now() - 1000 })
+    expect(tm.userIdForToken(token)).toBeNull()
+    expect(tm.userIdForToken(tm.apiKeyToken('unknown', 'x'))).toBeNull()
+    // Ordinary tokens still work through the same path; refresh tokens do not.
+    const { accessToken, refreshToken } = tm.createSession(user, req)
+    expect(tm.userIdForToken(accessToken)).toBe('u1')
+    expect(tm.userIdForToken(refreshToken)).toBeNull()
+  })
+})

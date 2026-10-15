@@ -15,6 +15,14 @@ export interface AccessPayload {
   iat?: number
 }
 
+/** Payload of an API key token, same shape as upstream's. */
+export interface ApiKeyPayload {
+  keyId: string
+  name: string
+  type: 'api'
+  exp?: number
+}
+
 /**
  * Mirrors Audiobookshelf's TokenManager: short-lived access JWT, long-lived
  * refresh JWT stored per session, refresh rotation with a grace window for
@@ -56,6 +64,32 @@ export class TokenManager {
     } catch {
       return null
     }
+  }
+
+  /** Looks up an API key by id; set by the API key store. */
+  apiKeyResolver: ((keyId: string) => { userId: string; isActive: boolean; expiresAt: number | null } | undefined) | null = null
+
+  /** Sign an API key token: non-expiring unless `expiresIn` (seconds) is given. */
+  apiKeyToken(keyId: string, name: string, expiresIn?: number | null) {
+    return jwt.sign({ keyId, name, type: 'api' }, this.secret, expiresIn && expiresIn > 0 ? { expiresIn } : {})
+  }
+
+  /**
+   * The user a bearer token authenticates as, for both access tokens and
+   * API keys, or null. Used by the HTTP middleware and the socket handshake.
+   */
+  userIdForToken(token: string): string | null {
+    const payload = this.verify(token) as (AccessPayload & Partial<ApiKeyPayload>) | null
+    if (!payload) return null
+    if (payload.type === 'api') {
+      if (!payload.keyId || !this.apiKeyResolver) return null
+      const key = this.apiKeyResolver(payload.keyId)
+      if (!key?.isActive) return null
+      if (payload.exp && payload.exp < Date.now() / 1000) return null
+      if (key.expiresAt && key.expiresAt < Date.now()) return null
+      return key.userId
+    }
+    return TokenManager.isAccess(payload) ? payload.userId : null
   }
 
   /** True when a decoded token may authenticate API or socket calls. */

@@ -1,6 +1,5 @@
 import type { Request, Response, NextFunction } from 'express'
 import type { Context } from '../context.js'
-import { TokenManager } from './tokens.js'
 
 /** GET routes Audiobookshelf serves without auth (cover images, author images). */
 const NO_AUTH_GET = [/^\/items\/[^/]+\/cover$/, /^\/authors\/[^/]+\/image$/]
@@ -22,10 +21,9 @@ export function authMiddleware(ctx: Context) {
     if (req.method === 'GET' && NO_AUTH_GET.some((p) => p.test(req.path))) return next()
 
     const token = extractToken(req)
-    const payload = token ? ctx.tokens.verify(token) : null
-    if (!TokenManager.isAccess(payload)) return res.sendStatus(401)
-    const user = ctx.users.byId(payload.userId)
-    if (!user) return res.sendStatus(401)
+    const userId = token ? ctx.tokens.userIdForToken(token) : null
+    const user = userId ? ctx.users.byId(userId) : undefined
+    if (!user || !user.isActive) return res.sendStatus(401)
     req.smUser = user
     next()
   }

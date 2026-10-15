@@ -167,7 +167,7 @@ export class UserStore {
   /** Remove an admin-created user and everything they own. */
   remove(userId: string) {
     this.db.transaction(() => {
-      for (const t of ['auth_sessions', 'media_progress', 'bookmarks', 'user_extra', 'playback_sessions', 'listening_sessions', 'playlists']) this.db.prepare(`DELETE FROM ${t} WHERE userId = ?`).run(userId)
+      for (const t of ['auth_sessions', 'media_progress', 'bookmarks', 'user_extra', 'playback_sessions', 'listening_sessions', 'playlists', 'api_keys']) this.db.prepare(`DELETE FROM ${t} WHERE userId = ?`).run(userId)
       this.db.prepare('DELETE FROM users WHERE id = ?').run(userId)
     })()
   }

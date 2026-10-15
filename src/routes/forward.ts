@@ -14,7 +14,6 @@ const STREAM_PATHS = [/^\/items\/[^/]+\/(cover|file|ebook|download)/, /^\/author
 const STUBS: Record<string, unknown> = {
   '/users/online': { usersOnline: [], openSessions: [] },
   '/tasks': { tasks: [] },
-  '/api-keys': { apiKeys: [] },
   '/notifications': { data: { events: [] }, settings: { id: 'notification-settings', appriseType: 'api', appriseApiUrl: null, notifications: [], maxFailedAttempts: 5, maxNotificationQueue: 20, notificationDelay: 1000 } },
   '/auth-settings': { authActiveAuthMethods: ['local'], authLoginCustomMessage: '', authOpenIDIssuerURL: null },
   '/logger-data': { currentDailyLogs: [] },

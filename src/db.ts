@@ -113,6 +113,18 @@ export interface ListeningSessionRow {
   updatedAt: number
 }
 
+export interface ApiKeyRow {
+  id: string
+  name: string
+  userId: string
+  isActive: number
+  expiresAt: number | null
+  lastUsedAt: number | null
+  createdByUserId: string
+  createdAt: number
+  updatedAt: number
+}
+
 export interface CollectionRow {
   id: string
   libraryId: string
@@ -262,6 +274,17 @@ CREATE TABLE IF NOT EXISTS playlist_items (
   episodeId TEXT NOT NULL DEFAULT '',
   "order" INTEGER NOT NULL,
   PRIMARY KEY (playlistId, libraryItemId, episodeId)
+);
+CREATE TABLE IF NOT EXISTS api_keys (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  userId TEXT NOT NULL,
+  isActive INTEGER NOT NULL DEFAULT 1,
+  expiresAt INTEGER,
+  lastUsedAt INTEGER,
+  createdByUserId TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS kv (
   key TEXT PRIMARY KEY,

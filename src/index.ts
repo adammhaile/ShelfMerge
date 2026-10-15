@@ -16,6 +16,7 @@ import { IndexStore } from './index/store.js'
 import { IndexQuery } from './index/query.js'
 import { Indexer } from './index/sync.js'
 import { Accounts } from './accounts.js'
+import { ApiKeyStore } from './auth/apikeys.js'
 import { SocketHub } from './socket/hub.js'
 import { createApp, BASE_PATH } from './app.js'
 import { relabel } from './routes/merged.js'
@@ -84,7 +85,8 @@ async function main() {
     return payload
   }
 
-  const ctx = { cfg, db, registry, tokens, users, progress, sessions, socket, catalog, history, collections, indexStore, indexQuery, indexer, lastLibrary: new Map(), absVersion: ABS_VERSION } as Context
+  const apiKeys = new ApiKeyStore(db, tokens)
+  const ctx = { cfg, db, registry, tokens, users, progress, sessions, socket, catalog, history, collections, indexStore, indexQuery, indexer, apiKeys, lastLibrary: new Map(), absVersion: ABS_VERSION } as Context
   ctx.accounts = new Accounts(ctx)
 
   await catalog.start()

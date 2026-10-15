@@ -7,6 +7,7 @@ import { authRoutes } from './auth/routes.js'
 import { authMiddleware } from './auth/middleware.js'
 import { meRoutes } from './routes/me.js'
 import { userRoutes } from './routes/users.js'
+import { apiKeyRoutes } from './routes/apikeys.js'
 import { libraryRoutes } from './routes/libraries.js'
 import { mergedRoutes } from './routes/merged.js'
 import { collectionRoutes } from './routes/collections.js'
@@ -99,6 +100,7 @@ export function createApp(ctx: Context) {
   api.use(authMiddleware(ctx))
   api.use(meRoutes(ctx))
   api.use(userRoutes(ctx))
+  api.use(apiKeyRoutes(ctx))
   api.use(mergedRoutes(ctx))
   api.use(libraryRoutes(ctx))
   api.use(collectionRoutes(ctx))
