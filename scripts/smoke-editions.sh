@@ -44,7 +44,7 @@ desc = json.loads(os.environ["ITEM_JSON"])["media"]["metadata"]["description"]
 assert "Other editions" in desc and f'href="/item/{os.environ["B"]}"' in desc, desc
 print("link to B edition present (unprefixed /item path)")
 PY
-curl -fsS "${auth[@]}" "$SM/api/items/$SHORT_B?expanded=1" | python3 -I -c 'import json,sys; d=json.load(sys.stdin); desc=d["media"]["metadata"]["description"]; assert "(shown in library)" in desc, desc; print("hidden edition page points at the shown one")'
+curl -fsS "${auth[@]}" "$SM/api/items/$SHORT_B?expanded=1" | python3 -I -c 'import json,sys; desc=json.load(sys.stdin)["media"]["metadata"]["description"]; assert "This edition:</strong> From server: Dev B" in desc and "From server: Dev A" in desc, desc; print("editions block names the server of each edition")'
 
 step "progress carries over to the other edition on first play"
 S="$(curl -fsS "${auth[@]}" -X POST "$SM/api/items/$SHORT_A/play" -d '{"deviceInfo":{"clientName":"smoke","deviceId":"smoke-e"},"mediaPlayer":"html5","forceDirectPlay":true}')"

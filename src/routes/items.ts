@@ -107,7 +107,7 @@ export function itemRoutes(ctx: Context): Router {
    */
   const editionsBlock = (set: EditionSet, itemId: string): string => {
     const label = (key: string) => ctx.registry.server(key)?.label ?? key
-    const describe = (m: EditionSet['members'][number]) => [label(m.serverKey), m.narratorName ? `narrated by ${m.narratorName}` : null, formatDuration(m.duration)].filter(Boolean).join(', ')
+    const describe = (m: EditionSet['members'][number]) => [`From server: ${label(m.serverKey)}`, m.narratorName ? `narrated by ${m.narratorName}` : null, formatDuration(m.duration)].filter(Boolean).join(' · ')
     const me = set.members.find((m) => m.id === itemId)
     const others = set.members.filter((m) => m.id !== itemId)
     // Neither client intercepts links inside a description: a plain link makes
@@ -118,9 +118,9 @@ export function itemRoutes(ctx: Context): Router {
     const link = (id: string) => `/item/${id}`
     const lines = others.map(
       (m) =>
-        `<li><a href="${link(m.id)}" onclick="if(window.$nuxt&amp;&amp;window.$nuxt.$router){window.$nuxt.$router.push('${link(m.id)}');return false}">${describe(m)}</a>${m.id === set.preferred ? ' (shown in library)' : ''}</li>`
+        `<li><a href="${link(m.id)}" onclick="if(window.$nuxt&amp;&amp;window.$nuxt.$router){window.$nuxt.$router.push('${link(m.id)}');return false}">${describe(m)}</a></li>`
     )
-    const current = me ? `<p><strong>This edition:</strong> ${describe(me)}${me.id === set.preferred ? ' (shown in library)' : ''}</p>` : ''
+    const current = me ? `<p><strong>This edition:</strong> ${describe(me)}</p>` : ''
     return `${current}<p><strong>Other editions</strong></p><ul>${lines.join('')}</ul>`
   }
 
