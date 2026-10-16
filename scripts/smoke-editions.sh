@@ -38,7 +38,12 @@ curl -fsS "${auth[@]}" "$SM/api/libraries/$M/filterdata" | j '"bookCount:", d["b
 
 step "item page lists the other edition with a link"
 curl -fsS "${auth[@]}" "$SM/api/items/$SHORT_A?expanded=1" | j '"description tail:", d["media"]["metadata"]["description"][-160:]'
-curl -fsS "${auth[@]}" "$SM/api/items/$SHORT_A?expanded=1" | B="$SHORT_B" python3 -I -c 'import json,os,sys; d=json.load(sys.stdin); desc=d["media"]["metadata"]["description"]; assert "Other editions" in desc and ('href="/item/' + os.environ["B"] + '"') in desc, desc; print("link to B edition present")'
+ITEM_JSON="$(curl -fsS "${auth[@]}" "$SM/api/items/$SHORT_A?expanded=1")" B="$SHORT_B" python3 -I - <<'PY'
+import json, os
+desc = json.loads(os.environ["ITEM_JSON"])["media"]["metadata"]["description"]
+assert "Other editions" in desc and f'href="/item/{os.environ["B"]}"' in desc, desc
+print("link to B edition present (unprefixed /item path)")
+PY
 curl -fsS "${auth[@]}" "$SM/api/items/$SHORT_B?expanded=1" | python3 -I -c 'import json,sys; d=json.load(sys.stdin); desc=d["media"]["metadata"]["description"]; assert "(shown in library)" in desc, desc; print("hidden edition page points at the shown one")'
 
 step "progress carries over to the other edition on first play"
