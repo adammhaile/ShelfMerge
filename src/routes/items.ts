@@ -7,7 +7,6 @@ import type { SessionSnapshot } from '../history.js'
 import type { EditionSet } from '../index/editions.js'
 import { formatDuration } from '../index/editions.js'
 import { registerEditions } from './merged.js'
-import { BASE_PATH } from '../app.js'
 import { log } from '../logger.js'
 
 interface SessionJSON extends SessionSnapshot {
@@ -111,7 +110,10 @@ export function itemRoutes(ctx: Context): Router {
     const describe = (m: EditionSet['members'][number]) => [label(m.serverKey), m.narratorName ? `narrated by ${m.narratorName}` : null, formatDuration(m.duration)].filter(Boolean).join(', ')
     const me = set.members.find((m) => m.id === itemId)
     const others = set.members.filter((m) => m.id !== itemId)
-    const lines = others.map((m) => `<li><a href="${BASE_PATH}/item/${m.id}">${describe(m)}</a>${m.id === set.preferred ? ' (shown in library)' : ''}</li>`)
+    // Unprefixed path: the mobile apps route /item/:id at their root and do not
+    // intercept description links, while the web client's router accepts the
+    // path with or without its /audiobookshelf base on a fresh page load.
+    const lines = others.map((m) => `<li><a href="/item/${m.id}">${describe(m)}</a>${m.id === set.preferred ? ' (shown in library)' : ''}</li>`)
     const current = me ? `<p><strong>This edition:</strong> ${describe(me)}${me.id === set.preferred ? ' (shown in library)' : ''}</p>` : ''
     return `${current}<p><strong>Other editions</strong></p><ul>${lines.join('')}</ul>`
   }
