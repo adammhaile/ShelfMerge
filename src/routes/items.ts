@@ -110,10 +110,16 @@ export function itemRoutes(ctx: Context): Router {
     const describe = (m: EditionSet['members'][number]) => [label(m.serverKey), m.narratorName ? `narrated by ${m.narratorName}` : null, formatDuration(m.duration)].filter(Boolean).join(', ')
     const me = set.members.find((m) => m.id === itemId)
     const others = set.members.filter((m) => m.id !== itemId)
-    // Unprefixed path: the mobile apps route /item/:id at their root and do not
-    // intercept description links, while the web client's router accepts the
-    // path with or without its /audiobookshelf base on a fresh page load.
-    const lines = others.map((m) => `<li><a href="/item/${m.id}">${describe(m)}</a>${m.id === set.preferred ? ' (shown in library)' : ''}</li>`)
+    // Neither client intercepts links inside a description: a plain link makes
+    // the mobile app reload its web view, which always starts on the bookshelf.
+    // Both clients are Nuxt apps exposing their router as window.$nuxt.$router,
+    // so the click handler navigates in-app (the web client adds its own
+    // /audiobookshelf base); the unprefixed href is the fallback.
+    const link = (id: string) => `/item/${id}`
+    const lines = others.map(
+      (m) =>
+        `<li><a href="${link(m.id)}" onclick="if(window.$nuxt&amp;&amp;window.$nuxt.$router){window.$nuxt.$router.push('${link(m.id)}');return false}">${describe(m)}</a>${m.id === set.preferred ? ' (shown in library)' : ''}</li>`
+    )
     const current = me ? `<p><strong>This edition:</strong> ${describe(me)}${me.id === set.preferred ? ' (shown in library)' : ''}</p>` : ''
     return `${current}<p><strong>Other editions</strong></p><ul>${lines.join('')}</ul>`
   }
