@@ -30,6 +30,8 @@ const BATCH = 100
 export class Indexer {
   private timer: NodeJS.Timeout | null = null
   private readonly running = new Set<string>()
+  /** Consecutive failed pulls per library, for retry backoff. */
+  private readonly failures = new Map<string, number>()
 
   constructor(
     private readonly store: IndexStore,
@@ -124,8 +126,14 @@ export class Indexer {
       this.store.markSynced(libraryId, serverKey, seen.size)
       this.onLibraryPulled?.(libraryId)
       log.info(`[index] ${serverKey}/${libraryId}: ${seen.size} of ${total} items indexed in ${((Date.now() - started) / 1000).toFixed(1)}s`)
+      this.failures.delete(libraryId)
     } catch (err) {
-      log.warn(`[index] pull of ${serverKey}/${libraryId} failed:`, (err as Error).message)
+      // Retry soon rather than waiting for the next scheduled pass: 2, 5, 15, then 30 minutes.
+      const n = (this.failures.get(libraryId) ?? 0) + 1
+      this.failures.set(libraryId, n)
+      const delayMin = [2, 5, 15][n - 1] ?? 30
+      log.warn(`[index] pull of ${serverKey}/${libraryId} failed (attempt ${n}, retrying in ${delayMin} min):`, (err as Error).message)
+      setTimeout(() => this.pullLibrary(serverKey, libraryId).catch(() => {}), delayMin * 60_000).unref()
     } finally {
       this.running.delete(libraryId)
     }

@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable, PassThrough } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import { request, type Dispatcher } from 'undici'
+import { request, Client, type Dispatcher } from 'undici'
 import type { ServerConfig } from '../config.js'
 import { log } from '../logger.js'
 
@@ -14,6 +14,43 @@ import { log } from '../logger.js'
  */
 const RELAY_BUFFER = Math.max(1, Number(process.env.SHELFMERGE_RELAY_BUFFER_MB) || 8) * 1024 * 1024
 const UPSTREAM_READ_BUFFER = 1024 * 1024
+
+/**
+ * A keep-alive connection the server already closed: the request never got
+ * an answer. Some servers (or the proxies in front of them) drop pooled
+ * connections after a few large responses; the next request on that socket
+ * fails immediately with one of these.
+ */
+function isStaleConnection(err: unknown): boolean {
+  const code = (err as { code?: string })?.code
+  return code === 'UND_ERR_SOCKET' || code === 'UND_ERR_CLOSED' || code === 'ECONNRESET' || code === 'EPIPE'
+}
+
+/** Requests that only read, so sending them a second time is harmless. */
+const isReadOnly = (method: string, path: string) => method === 'GET' || method === 'HEAD' || /^\/api\/(items\/batch\/get|authorize)(\?|$)/.test(path)
+
+/** undici request, retried once on a fresh connection if a pooled one turns out to be dead (read-only requests only). */
+async function requestWithRetry(url: string, path: string, opts: NonNullable<Parameters<typeof request>[1]>): Promise<Awaited<ReturnType<typeof request>>> {
+  try {
+    return await request(url, opts)
+  } catch (err) {
+    const method = String((opts as { method?: string })?.method ?? 'GET').toUpperCase()
+    const body = (opts as { body?: unknown })?.body
+    const replayable = body === undefined || typeof body === 'string'
+    if (!isStaleConnection(err) || !isReadOnly(method, path) || !replayable) throw err
+    log.debug(`[upstream] ${method} ${path} hit a closed connection, retrying on a fresh one`)
+    // A one-off client guarantees a new connection; the pool may hold more dead ones.
+    const client = new Client(new URL(url).origin)
+    try {
+      const res = await request(url, { ...opts, dispatcher: client })
+      res.body.once('close', () => client.close().catch(() => {}))
+      return res
+    } catch (retryErr) {
+      client.close().catch(() => {})
+      throw retryErr
+    }
+  }
+}
 
 export class UpstreamError extends Error {
   constructor(
@@ -90,7 +127,7 @@ export class UpstreamServer {
 
   /** Perform a JSON request upstream (no client request involved). */
   async json<T = unknown>(path: string, init: { method?: Dispatcher.HttpMethod; body?: unknown; headers?: Record<string, string> } = {}): Promise<JsonResult<T>> {
-    const res = await request(this.url + path, {
+    const res = await requestWithRetry(this.url + path, path, {
       method: init.method ?? 'GET',
       headers: {
         authorization: this.authHeader,
@@ -147,9 +184,9 @@ export class UpstreamServer {
       body = requestBody(req, headers)
     }
 
-    let upstream: Dispatcher.ResponseData
+    let upstream: Awaited<ReturnType<typeof request>>
     try {
-      upstream = await request(this.url + path, { method, headers, body, highWaterMark: UPSTREAM_READ_BUFFER })
+      upstream = await requestWithRetry(this.url + path, path, { method, headers, body, highWaterMark: UPSTREAM_READ_BUFFER })
     } catch (err) {
       log.error(`[upstream:${this.key}] ${method} ${path} failed:`, (err as Error).message)
       if (!res.headersSent) {
@@ -203,7 +240,7 @@ export class UpstreamServer {
     } else {
       body = requestBody(req, headers)
     }
-    const res = await request(this.url + path, { method, headers, body })
+    const res = await requestWithRetry(this.url + path, path, { method, headers, body })
     const text = await res.body.text()
     let json: T | null = null
     if (String(res.headers['content-type'] ?? '').includes('application/json') && text) {
