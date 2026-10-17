@@ -68,6 +68,9 @@ users:
     # (own permissions, own history), and progress flows both ways.
     accounts:
       home: ${ADAM_HOME_KEY}
+    # Optional: servers to prefer when a book exists on several, most preferred
+    # first. Without it, a user's own-account servers come first automatically.
+    # preferServers: [home]
   guest:
     password: change-me
     libraries: [merged:Everything, home:Audiobooks]

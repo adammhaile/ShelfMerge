@@ -28,7 +28,7 @@ users:
   it('parses servers, users, defaults and the default merged library', () => {
     const cfg = parseConfig(base)
     expect(cfg.servers.map((s) => [s.key, s.url, s.label])).toEqual([['a', 'http://a.example', 'A'], ['b', 'http://b.example', 'b']])
-    expect(cfg.users.find((u) => u.username === 'adam')).toMatchObject({ admin: true, accounts: { a: 'own' }, libraries: null })
+    expect(cfg.users.find((u) => u.username === 'adam')).toMatchObject({ admin: true, accounts: { a: 'own' }, libraries: null, preferServers: [] })
     expect(cfg.users.find((u) => u.username === 'guest')).toMatchObject({ password: null, admin: false, libraries: ['a:*', 'merged:Everything'] })
     expect(cfg.merged).toEqual([{ name: 'Everything', mediaType: 'book', sources: ['*'], collapseEditions: true, preferServers: ['a', 'b'], keepSeparate: [] }])
     expect(cfg.prefixLibraryNames).toBe(true)
@@ -37,6 +37,8 @@ users:
     expect(() => parseConfig(base + "  bad: { libraries: ['zzz:*'] }\n")).toThrow(/zzz/)
     expect(() => parseConfig(base + "  bad: { accounts: { zzz: k } }\n")).toThrow(/zzz/)
     expect(() => parseConfig(base + "merged:\n  - { name: X, preferServers: [zzz] }\n")).toThrow(/zzz/)
+    expect(() => parseConfig(base + "  bad: { preferServers: [zzz] }\n")).toThrow(/zzz/)
+    expect(parseConfig(base + "  carol: { preferServers: [b, a] }\n").users.find((u) => u.username === 'carol')?.preferServers).toEqual(['b', 'a'])
   })
   it('requires at least one server and one user', () => {
     expect(() => parseConfig('users: { a: { password: x } }')).toThrow(/server/)

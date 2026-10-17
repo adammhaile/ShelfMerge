@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { IndexStore, ItemRow, SeriesRow, AuthorRow } from './store.js'
 import { toMinified, type StoredItem } from './minify.js'
 import { buildEditionSets, type EditionOptions, type EditionSet } from './editions.js'
@@ -12,6 +13,15 @@ export interface IndexedItem {
   tags: string[]
   seriesIds: string[]
   authorIds: string[]
+}
+
+/**
+ * Who is looking, for choosing which edition of a book they see. `order` is
+ * the viewer's server preference, most preferred first.
+ */
+export interface Viewer {
+  userId: string
+  order: string[]
 }
 
 export interface ItemsQuery {
@@ -97,6 +107,8 @@ export class IndexQuery {
   /** Edition collapsing per scope (sorted library ids joined), registered by the merged routes. */
   private readonly editionOptions = new Map<string, EditionOptions>()
   private readonly editionSets = new Map<string, Map<string, EditionSet>>()
+  /** The viewer of the current request; set by the routes with asViewer(). */
+  private readonly viewerStore = new AsyncLocalStorage<Viewer>()
 
   constructor(
     private readonly store: IndexStore,
@@ -154,14 +166,46 @@ export class IndexQuery {
   }
   private readonly editionSignatures = new Map<string, string>()
 
+  /** Run `fn` (and everything it awaits) with this viewer's edition choices. */
+  asViewer<T>(viewer: Viewer, fn: () => T): T {
+    return this.viewerStore.run(viewer, fn)
+  }
+
+  /**
+   * The edition of `set` shown to the current viewer: one they already have
+   * progress on (most recent first), else the first by their server order,
+   * else the scope's default choice. Without a viewer: the default.
+   */
+  shownEdition(set: EditionSet): string {
+    const viewer = this.viewerStore.getStore()
+    if (!viewer) return set.preferred
+    let best: { id: string; at: number } | null = null
+    for (const m of set.members) {
+      const mp = this.progress.get(viewer.userId, m.id)
+      if (mp && (!best || mp.lastUpdate > best.at)) best = { id: m.id, at: mp.lastUpdate }
+    }
+    if (best) return best.id
+    const rank = (k: string) => {
+      const i = viewer.order.indexOf(k)
+      return i === -1 ? viewer.order.length : i
+    }
+    // Members are already sorted by the default preference, so a stable sort keeps it as the tie-breaker.
+    return [...set.members].sort((a, b) => rank(a.serverKey) - rank(b.serverKey))[0].id
+  }
+
   editionSetOf(libraryIds: string[], itemId: string): EditionSet | undefined {
     return this.sets(libraryIds).get(itemId)
   }
 
-  /** Ids hidden in this scope because a preferred edition stands in for them. */
+  /** Ids hidden in this scope for the current viewer, because another edition stands in for them. */
   hiddenEditions(libraryIds: string[]): Set<string> {
     const hidden = new Set<string>()
-    for (const [id, set] of this.sets(libraryIds)) if (set.preferred !== id) hidden.add(id)
+    const shown = new Map<EditionSet, string>()
+    for (const [id, set] of this.sets(libraryIds)) {
+      let pick = shown.get(set)
+      if (pick === undefined) shown.set(set, (pick = this.shownEdition(set)))
+      if (pick !== id) hidden.add(id)
+    }
     return hidden
   }
 

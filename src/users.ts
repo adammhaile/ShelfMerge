@@ -68,7 +68,7 @@ export class UserStore {
     const c = this.configs.get(user.username)
     if (c) return c
     const row = this.byUsername(user.username)
-    if (row?.source === 'admin') return { username: row.username, password: null, admin: false, libraries: null, accounts: {} }
+    if (row?.source === 'admin') return { username: row.username, password: null, admin: false, preferServers: [], libraries: null, accounts: {} }
     return undefined
   }
 

@@ -124,4 +124,47 @@ describe('IndexQuery', () => {
     ix.query.useEditions(LIBS, null)
     expect(q({}).total).toBe(6)
   })
+
+  describe('per-viewer edition choice', () => {
+    // The same book on server a (default first choice) and server b.
+    const setup = () => {
+      ix.store.putItem('b', book({ id: 'hobbit-b', title: 'The Hobbit', author: 'J. R. R. Tolkien', libraryId: 'lib-b', narrators: ['Andy Serkis'] }))
+      ix.query.invalidate()
+      ix.query.useEditions(LIBS, { preferServers: ['a', 'b'], keepSeparate: new Set() })
+    }
+    const shownHobbit = () => (q({}).results.find((i) => (i as { id: string }).id.startsWith('hobbit')) as { id: string }).id
+
+    it('without a viewer shows the default edition', () => {
+      setup()
+      expect(shownHobbit()).toBe('hobbit')
+    })
+
+    it("shows the edition on the viewer's preferred server", () => {
+      setup()
+      expect(ix.query.asViewer({ userId: 'u1', order: ['b', 'a'] }, shownHobbit)).toBe('hobbit-b')
+      expect(ix.query.asViewer({ userId: 'u1', order: ['a', 'b'] }, shownHobbit)).toBe('hobbit')
+      // Servers missing from the order fall back to the default preference.
+      expect(ix.query.asViewer({ userId: 'u1', order: [] }, shownHobbit)).toBe('hobbit')
+    })
+
+    it('prefers an edition the viewer has progress on, whatever the server order', () => {
+      setup()
+      ix.progress.createUpdate('u1', 'a', 'media-hobbit', { libraryItemId: 'hobbit', duration: 100, currentTime: 10 })
+      expect(ix.query.asViewer({ userId: 'u1', order: ['b', 'a'] }, shownHobbit)).toBe('hobbit')
+      // Another user without progress still gets their own preference.
+      expect(ix.query.asViewer({ userId: 'u2', order: ['b', 'a'] }, shownHobbit)).toBe('hobbit-b')
+      // Totals stay the same: one card per book either way.
+      expect(ix.query.asViewer({ userId: 'u2', order: ['b', 'a'] }, () => q({}).total)).toBe(5)
+    })
+
+    it('keeps the viewer across awaits and isolates concurrent viewers', async () => {
+      setup()
+      const pick = async (order: string[]) => ix.query.asViewer({ userId: 'u3', order }, async () => {
+        await new Promise((r) => setTimeout(r, 5))
+        return shownHobbit()
+      })
+      const [x, y] = await Promise.all([pick(['b']), pick(['a'])])
+      expect([x, y]).toEqual(['hobbit-b', 'hobbit'])
+    })
+  })
 })

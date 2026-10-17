@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import type { Context } from '../context.js'
 import type { FederatedLibrary } from '../upstream/catalog.js'
 import { fetchItems, type LibraryItemJSON } from './items-helpers.js'
+import type { Viewer } from '../index/query.js'
 
 interface Shelf {
   id: string
@@ -15,6 +16,17 @@ interface Shelf {
 /** Items from the index carry their source library id; present them as the merged library's. */
 export function relabel<T extends { libraryId?: unknown }>(json: T, libraryId: string): T {
   return { ...json, libraryId }
+}
+
+/**
+ * A user's server preference for choosing editions: their own preferServers,
+ * then servers where they have an own account, then the merged library's order.
+ */
+export function viewerFor(ctx: Context, user: Request['smUser'], lib: FederatedLibrary): Viewer {
+  const cfg = ctx.users.config(user)
+  const order: string[] = []
+  for (const k of [...(cfg?.preferServers ?? []), ...Object.keys(cfg?.accounts ?? {}), ...(lib.editions?.preferServers ?? [])]) if (!order.includes(k)) order.push(k)
+  return { userId: user.id, order }
 }
 
 /** Tell the query layer how this merged library collapses editions. */
@@ -45,7 +57,7 @@ export function mergedRoutes(ctx: Context): Router {
     if (!ctx.catalog.canAccess(ctx.users.config(req.smUser), lib.id)) return res.sendStatus(403)
     ctx.lastLibrary.set(req.smUser.id, lib.id)
     registerEditionsFor(lib)
-    return handler(req, res, lib)
+    return q.asViewer(viewerFor(ctx, req.smUser, lib), () => handler(req, res, lib))
   }
   const include = (req: Request) =>
     String(req.query.include ?? '')
@@ -276,7 +288,7 @@ export function mergedRoutes(ctx: Context): Router {
     const lib = last ? ctx.catalog.get(last) : undefined
     if (!lib?.merged) return next()
     registerEditionsFor(lib)
-    const detail = q.authorDetail(sources(lib), req.params.id, lib.id)
+    const detail = q.asViewer(viewerFor(ctx, req.smUser, lib), () => q.authorDetail(sources(lib), req.params.id, lib.id))
     if (!detail) return next()
     const inc = include(req)
     const json: Record<string, unknown> = { ...detail.author, numBooks: undefined, lastFirst: undefined }
